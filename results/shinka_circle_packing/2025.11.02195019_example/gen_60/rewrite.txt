@@ -1,0 +1,146 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+import math
+
+def max_radius_pt(p, centers, radii):
+    "Max feasible radius at point p given existing circles and walls."
+    r = min(p[0], p[1], 1-p[0], 1-p[1])
+    if len(centers)>0:
+        arr = np.array(centers)
+        dr = np.linalg.norm(arr - p, axis=1) - np.array(radii)
+        r = min(r, dr.min())
+    return max(r, 0.0)
+
+def greedy_hybrid(n, global_samples=5000, local_samples=2000, local_k=10, seed=0):
+    rnd = np.random.RandomState(seed)
+    centers, radii = [], []
+    for k in range(n):
+        # global sampling
+        pts = rnd.rand(global_samples,2)
+        rs = np.minimum.reduce([pts[:,0], pts[:,1], 1-pts[:,0], 1-pts[:,1]])
+        if k>0:
+            arr_c = np.array(centers); arr_r = np.array(radii)
+            dmat = np.linalg.norm(arr_c[None,:,:]-pts[:,None,:], axis=2) - arr_r
+            rs = np.minimum(rs, dmat.min(axis=1))
+        idx = np.argmax(rs)
+        best_p, best_r = pts[idx], rs[idx]
+        # local gap-biased sampling
+        for _ in range(local_k):
+            p = best_p + rnd.randn(2)*best_r*0.5
+            p = np.clip(p, 0.0, 1.0)
+            r = max_radius_pt(p, centers, radii)
+            if r > best_r:
+                best_r, best_p = r, p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-8))
+    return np.array(centers), np.array(radii)
+
+def compute_radius_at(i, centers, radii):
+    x,y = centers[i]
+    r = min(x,y,1-x,1-y)
+    n = centers.shape[0]
+    if n>1:
+        others = np.delete(centers, i, axis=0)
+        rr = np.delete(radii, i)
+        d = np.linalg.norm(others - centers[i], axis=1) - rr
+        r = min(r, d.min())
+    return max(r, 0.0)
+
+def adaptive_anneal(centers, radii, iters=20000, T0=0.1, Tmin=1e-6, seed=1):
+    rnd = np.random.RandomState(seed)
+    n = centers.shape[0]
+    curr_c, curr_r = centers.copy(), radii.copy()
+    curr_sum = curr_r.sum()
+    best_c, best_r, best_sum = curr_c.copy(), curr_r.copy(), curr_sum
+    T = T0; decay = (Tmin/T0)**(1.0/iters)
+    no_improve = 0
+    multi_prob, multi_cnt = 0.1, 3
+    for it in range(iters):
+        if rnd.rand() < multi_prob:
+            idx = rnd.choice(n, multi_cnt, replace=False)
+        else:
+            idx = [rnd.randint(n)]
+        old_ps = curr_c[idx].copy(); old_rs = curr_r[idx].copy()
+        step = rnd.randn(len(idx),2) * (0.02 * math.sqrt(T/T0))
+        new_ps = np.clip(old_ps + step, 0.0, 1.0)
+        curr_c[idx] = new_ps
+        new_rs = np.array([compute_radius_at(i, curr_c, curr_r) for i in idx])
+        if (new_rs > 1e-8).all():
+            new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+            dE = new_sum - curr_sum
+            if dE>0 or rnd.rand() < math.exp(dE/T):
+                curr_r[idx], curr_sum = new_rs, new_sum
+                if curr_sum > best_sum:
+                    best_sum, best_c, best_r = curr_sum, curr_c.copy(), curr_r.copy()
+                    no_improve = 0
+                else:
+                    no_improve += 1
+            else:
+                curr_c[idx] = old_ps
+                no_improve += 1
+        else:
+            curr_c[idx] = old_ps
+            no_improve += 1
+        # adaptive cooling
+        if no_improve < 50:
+            T *= decay * 1.01
+        else:
+            T *= decay * 0.9
+        T = max(T, Tmin)
+    return best_c, best_r
+
+def local_repack(centers, radii, samples=300, sweeps=2, seed=123):
+    rnd = np.random.RandomState(seed)
+    n = centers.shape[0]
+    for _ in range(sweeps):
+        for i in range(n):
+            best_p, best_r = centers[i].copy(), radii[i]
+            for _ in range(samples):
+                p = centers[i] + rnd.randn(2)*best_r*0.3
+                p = np.clip(p,0.0,1.0)
+                r = max_radius_pt(p, np.delete(centers,i,axis=0).tolist(),
+                                    np.delete(radii,i).tolist())
+                if r > best_r:
+                    best_r, best_p = r, p
+            centers[i], radii[i] = best_p, best_r
+    return centers, radii
+
+def repulsive_refine(centers, radii, iters=50, lr=0.005):
+    c = centers.copy(); n = c.shape[0]
+    for _ in range(iters):
+        r = np.array([compute_radius_at(i,c,radii) for i in range(n)])
+        forces = np.zeros_like(c)
+        diff = c[:,None,:] - c[None,:,:]
+        dist = np.linalg.norm(diff,axis=2) + np.eye(n)
+        overlap = (r[:,None]+r[None,:]) - dist
+        mask = overlap>0
+        dirs = np.zeros_like(diff)
+        nonz = dist>0
+        dirs[nonz] = diff[nonz]/dist[nonz][...,None]
+        f = (overlap[...,None]*dirs)
+        forces -= f.sum(axis=1) - f.sum(axis=0)
+        # border forces
+        forces[:,0] += np.where(c[:,0]<r, r-c[:,0], 0) - np.where(1-c[:,0]<r, r-(1-c[:,0]),0)
+        forces[:,1] += np.where(c[:,1]<r, r-c[:,1], 0) - np.where(1-c[:,1]<r, r-(1-c[:,1]),0)
+        c += lr * forces
+        c = np.clip(c,0.0,1.0)
+    # recompute radii once at end
+    r_final = np.array([compute_radius_at(i,c,radii) for i in range(n)])
+    return c, r_final
+
+def construct_packing():
+    n = 26
+    c, r = greedy_hybrid(n, global_samples=5000,
+                         local_samples=2000, local_k=10, seed=42)
+    c, r = adaptive_anneal(c, r, iters=20000, T0=0.1, Tmin=1e-6, seed=999)
+    c, r = local_repack(c, r, samples=300, sweeps=2, seed=314)
+    c, r = repulsive_refine(c, r, iters=50, lr=0.005)
+    return c, r
+# EVOLVE-BLOCK-END
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

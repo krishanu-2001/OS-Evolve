@@ -1,0 +1,122 @@
+<NAME>
+post_anneal_greedy_sweep
+</NAME>
+
+<DESCRIPTION>
+After the simulated annealing and force-based relaxation, apply a post-processing sweep to greedily re-optimize each circle’s position and radius while holding the others fixed. This can further increase the sum of radii by exploiting local gaps that may be left after global and local stochastic optimization. The sweep is robust, easy to implement, and is known to be effective at squeezing additional performance from modular optimization pipelines in circle packing and related geometric maximization problems.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+        return best_c, best_r
+=======
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+
+        # Post-processing: greedy coordinate repacking sweep
+        c_greedy, r_greedy = self._greedy_repack(best_c, best_r, n_sweeps=2)
+        if r_greedy.sum() > best_r.sum():
+            best_c, best_r = c_greedy, r_greedy
+
+        return best_c, best_r
+>>>>>>> REPLACE
+
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _force_refine(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = self._compute_radii(c)
+            forces = np.zeros_like(c)
+            diff = c[:,None,:] - c[None,:,:]
+            dist = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = r[:,None] + r[None,:]
+            overlap = sumr - dist
+            mask = overlap > 0
+            dirs = np.zeros_like(diff)
+            nz = dist > 0
+            dirs[nz] = diff[nz]/dist[nz][...,None]
+            f = overlap[...,None] * dirs
+            forces -= np.sum(np.where(mask[...,None], f, 0), axis=1)
+            forces += np.sum(np.where(mask[...,None], f, 0), axis=0)
+            # border repulsion
+            left  = np.where(c[:,0] < r, (r - c[:,0]), 0)
+            right = np.where(1-c[:,0] < r, (r - (1-c[:,0])), 0)
+            down  = np.where(c[:,1] < r, (r - c[:,1]), 0)
+            up    = np.where(1-c[:,1] < r, (r - (1-c[:,1])), 0)
+            forces[:,0] += left - right
+            forces[:,1] += down - up
+            c += self.force_lr * forces
+            c = np.clip(c, 0.0, 1.0)
+        return c, self._compute_radii(c)
+=======
+    def _force_refine(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = self._compute_radii(c)
+            forces = np.zeros_like(c)
+            diff = c[:,None,:] - c[None,:,:]
+            dist = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = r[:,None] + r[None,:]
+            overlap = sumr - dist
+            mask = overlap > 0
+            dirs = np.zeros_like(diff)
+            nz = dist > 0
+            dirs[nz] = diff[nz]/dist[nz][...,None]
+            f = overlap[...,None] * dirs
+            forces -= np.sum(np.where(mask[...,None], f, 0), axis=1)
+            forces += np.sum(np.where(mask[...,None], f, 0), axis=0)
+            # border repulsion
+            left  = np.where(c[:,0] < r, (r - c[:,0]), 0)
+            right = np.where(1-c[:,0] < r, (r - (1-c[:,0])), 0)
+            down  = np.where(c[:,1] < r, (r - c[:,1]), 0)
+            up    = np.where(1-c[:,1] < r, (r - (1-c[:,1])), 0)
+            forces[:,0] += left - right
+            forces[:,1] += down - up
+            c += self.force_lr * forces
+            c = np.clip(c, 0.0, 1.0)
+        return c, self._compute_radii(c)
+
+    def _greedy_repack(self, centers: np.ndarray, radii: np.ndarray, n_sweeps: int = 2) -> Tuple[np.ndarray, np.ndarray]:
+        # For each circle, given all others fixed, move and resize to maximize its radius
+        c = centers.copy()
+        n = c.shape[0]
+        for sweep in range(n_sweeps):
+            for i in range(n):
+                candidates = []
+                fixed = np.delete(c, i, axis=0)
+                # Try many candidate positions in a small square around old center, but also allow larger jumps
+                samples = [c[i]]  # try current as candidate
+                # Local sampling
+                for _ in range(16):
+                    offset = 0.06 * (np.random.rand(2) - 0.5)
+                    samples.append(np.clip(c[i] + offset, 0.0, 1.0))
+                # Broader region
+                for _ in range(6):
+                    samples.append(np.random.rand(2))
+                best_r, best_pos = -1, None
+                for s in samples:
+                    # max radius limited by border
+                    r_max = np.min([s[0], s[1], 1-s[0], 1-s[1]])
+                    # also limited by distance to all other centers
+                    dists = np.linalg.norm(fixed - s, axis=1)
+                    max_pair = np.min(dists)
+                    r_cand = min(r_max, max_pair) if max_pair > 0 else 0
+                    if r_cand > best_r:
+                        best_r, best_pos = r_cand, s
+                if best_r > 0:
+                    c[i] = best_pos
+        # Re-deduce radii for *final* configuration
+        r = self._compute_radii(c)
+        return c, r
+>>>>>>> REPLACE
+
+</DIFF>

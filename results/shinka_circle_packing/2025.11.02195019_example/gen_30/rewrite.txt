@@ -1,0 +1,131 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+import math
+
+def greedy_initial(n, samples=8000, seed=0):
+    """
+    Sequentially place n circles.
+    At each step, sample 'samples' random points and pick the one
+    with the largest feasible radius given existing circles.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    for k in range(n):
+        pts = rnd.rand(samples,2)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # for first circle just pick the best by walls
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by walls
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+    return np.array(centers), np.array(radii)
+
+def compute_radius_at(i, centers, radii):
+    """
+    Given center i, compute its maximal radius not overlapping others or walls.
+    """
+    x,y = centers[i]
+    # wall limit
+    r = min(x, y, 1-x, 1-y)
+    if len(centers) > 1:
+        # exclude self
+        others = np.delete(centers, i, axis=0)
+        rads  = np.delete(radii, i)
+        d = np.linalg.norm(others - centers[i], axis=1) - rads
+        r = min(r, d.min())
+    return max(r, 0.0)
+
+def simulated_annealing(centers, radii, iters=12000, T0=0.1, Tend=1e-4, seed=1):
+    """
+    Refine the placement by simulated annealing: perturb one circle at a time,
+    recompute its max radius, and accept moves that improve total radius or
+    stochastically based on temperature.
+    """
+    rnd = np.random.RandomState(seed)
+    n = centers.shape[0]
+    best_centers = centers.copy()
+    best_radii  = radii.copy()
+    best_sum = radii.sum()
+
+    curr_centers = centers.copy()
+    curr_radii = radii.copy()
+    curr_sum = best_sum
+    T = T0
+    decay = (Tend/T0)**(1.0/iters)
+
+    for it in range(iters):
+        # pick a random circle to move
+        i = rnd.randint(n)
+        old_p = curr_centers[i].copy()
+        old_r = curr_radii[i]
+        # propose new center with small gaussian step
+        step = rnd.randn(2) * 0.02
+        new_p = old_p + step
+        # keep inside
+        new_p = np.clip(new_p, 0.0, 1.0)
+        curr_centers[i] = new_p
+        # recompute only its radius
+        new_r = compute_radius_at(i, curr_centers, curr_radii)
+        if new_r <= 1e-8:
+            # reject move
+            curr_centers[i] = old_p
+        else:
+            new_sum = curr_sum - old_r + new_r
+            delta = new_sum - curr_sum
+            if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                # accept
+                curr_radii[i] = new_r
+                curr_sum = new_sum
+                # track best
+                if curr_sum > best_sum:
+                    best_sum = curr_sum
+                    best_centers[:] = curr_centers
+                    best_radii[:]  = curr_radii
+            else:
+                # reject
+                curr_centers[i] = old_p
+        # cool down
+        T *= decay
+
+    return best_centers, best_radii
+
+def construct_packing():
+    """
+    Build and optimize 26-circle packing via greedy initialization
+    followed by simulated annealing refinement.
+    """
+    n = 26
+    # Phase 1: greedy placement
+    centers, radii = greedy_initial(n, samples=8000, seed=42)
+    # Phase 2: simulated annealing
+    centers, radii = simulated_annealing(centers, radii,
+                                         iters=15000,
+                                         T0=0.05,
+                                         Tend=1e-5,
+                                         seed=999)
+    return centers, radii
+
+# EVOLVE-BLOCK-END
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

@@ -1,0 +1,113 @@
+<NAME>
+add_corner_initialization
+</NAME>
+<DESCRIPTION>
+Modify the `_initialize` method to include a corner-focused seeding strategy. With 40% probability use the existing hex layout, 20% probability use a new `_corner_layout`, and 40% probability random uniform. This ensures targeted filling of square corners and edges in some restarts.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    def _initialize(self):
+        # 50% hex layout, 50% random uniform
+        if self.rng.random() < 0.5:
+            layout = self.rng.choice(self.layouts)
+            return self._hex_layout(layout)
+        else:
+            return self.rng.uniform(
+                self.margin, 1 - self.margin, size=(self.n, 2)
+            )
+=======
+    def _initialize(self):
+        # 40% hex layout, 20% corner-focused, 40% random uniform
+        r = self.rng.random()
+        if r < 0.4:
+            layout = self.rng.choice(self.layouts)
+            return self._hex_layout(layout)
+        elif r < 0.6:
+            return self._corner_layout()
+        else:
+            return self.rng.uniform(
+                self.margin, 1 - self.margin, size=(self.n, 2)
+            )
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+corner_layout_method
+</NAME>
+<DESCRIPTION>
+Add a new `_corner_layout` helper in `PackingPipeline` to place 4 circles near the corners and distribute the remaining ones evenly along the edges, improving initial edge coverage.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        return centers
+=======
+        return centers
+
+    def _corner_layout(self):
+        """
+        Place 4 circles near corners and distribute others along edges.
+        """
+        centers = np.zeros((self.n, 2))
+        margin = self.margin + 0.01
+        # corners
+        corners = [
+            [margin, margin],
+            [1-margin, margin],
+            [margin, 1-margin],
+            [1-margin, 1-margin]
+        ]
+        for i, c in enumerate(corners):
+            centers[i] = c
+        # distribute rest along edges
+        num_edge = self.n - len(corners)
+        per_edge = num_edge // 4
+        extra = num_edge % 4
+        idx = len(corners)
+        # bottom edge
+        for k in range(per_edge + (1 if extra > 0 else 0)):
+            t = (k+1)/(per_edge + (1 if extra > 0 else 0) + 1)
+            centers[idx] = [margin + t*(1-2*margin), margin]
+            idx += 1
+        # right edge
+        for k in range(per_edge + (1 if extra > 1 else 0)):
+            t = (k+1)/(per_edge + (1 if extra > 1 else 0) + 1)
+            centers[idx] = [1-margin, margin + t*(1-2*margin)]
+            idx += 1
+        # top edge
+        for k in range(per_edge + (1 if extra > 2 else 0)):
+            t = (k+1)/(per_edge + (1 if extra > 2 else 0) + 1)
+            centers[idx] = [1-margin - t*(1-2*margin), 1-margin]
+            idx += 1
+        # left edge
+        for k in range(per_edge):
+            t = (k+1)/(per_edge + 1)
+            centers[idx] = [margin, 1-margin - t*(1-2*margin)]
+            idx += 1
+        return centers
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+adaptive_multimove_hillclimb
+</NAME>
+<DESCRIPTION>
+Enhance the hill-climbing `_hill_climb` by making the multi-center perturbation probability adaptive: start with a higher exploration rate that decays over iterations, improving exploration early and exploitation later.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+            if self.rng.random() < 0.2:
+                # multi-center move
+                k = self.rng.integers(2, 5)
+                idxs = self.rng.choice(self.n, size=k, replace=False)
+                for i in idxs:
+                    cand_c[i] += self.rng.uniform(-alpha, alpha, 2)
+=======
+            prob = 0.5 * (1 - t/self.hill_iters) + 0.1
+            if self.rng.random() < prob:
+                # adaptive multi-center move
+                k = self.rng.integers(2, 5)
+                idxs = self.rng.choice(self.n, size=k, replace=False)
+                for i in idxs:
+                    cand_c[i] += self.rng.uniform(-alpha, alpha, 2)
+>>>>>>> REPLACE
+</DIFF>

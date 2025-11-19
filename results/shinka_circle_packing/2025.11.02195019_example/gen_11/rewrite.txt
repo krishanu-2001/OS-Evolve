@@ -1,0 +1,139 @@
+# EVOLVE-BLOCK-START
+"""Hybrid circle packing combining structured placement with physics-based relaxation"""
+
+import numpy as np
+
+def initialize_centers():
+    """
+    Initialize circle centers with a structured layout:
+    - 4 large circles near corners
+    - 8 medium circles along edges
+    - 9 in a 3x3 grid near center
+    - 5 small circles near center with offsets
+    """
+    centers = np.zeros((26, 2))
+    corner_offset = 0.15
+    # Corners
+    corners = [
+        (corner_offset, corner_offset),
+        (corner_offset, 1 - corner_offset),
+        (1 - corner_offset, corner_offset),
+        (1 - corner_offset, 1 - corner_offset)
+    ]
+    for i in range(4):
+        centers[i] = corners[i]
+    # Edges
+    for i in range(4):
+        centers[4 + i] = [0.25 + 0.15 * i, corner_offset]
+        centers[8 + i] = [0.25 + 0.15 * i, 1 - corner_offset]
+    # 3x3 grid near center
+    start = 0.32
+    spacing = 0.18
+    idx = 12
+    for row in range(3):
+        for col in range(3):
+            centers[idx] = [start + col * spacing, start + row * spacing]
+            idx += 1
+    # Small offset circles
+    small_positions = [
+        (0.5, 0.15),
+        (0.5, 0.85),
+        (0.15, 0.5),
+        (0.85, 0.5),
+        (0.5, 0.5)
+    ]
+    for i in range(5):
+        centers[idx] = small_positions[i]
+        idx += 1
+    # Clip to inside square
+    centers = np.clip(centers, 0.01, 0.99)
+    return centers
+
+def compute_max_radii(centers, relaxation_iters=5):
+    """
+    Compute radii based on current centers, iteratively relaxing overlaps.
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+    # Limit by borders
+    for i in range(n):
+        x, y = centers[i]
+        radii[i] = min(x, y, 1 - x, 1 - y)
+    # Relax overlaps
+    for _ in range(relaxation_iters):
+        diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2) + np.eye(n)
+        sum_radii = radii[:, np.newaxis] + radii[np.newaxis, :]
+        overlap_mask = (sum_radii > dist) & (np.eye(n) == 0)
+        scale = np.ones_like(dist)
+        scale[overlap_mask] = dist[overlap_mask] / sum_radii[overlap_mask]
+        min_scale = scale.min(axis=1)
+        radii *= min_scale
+        radii = np.maximum(radii, 1e-6)
+    return radii
+
+def compute_forces(centers, radii):
+    """
+    Compute forces based on overlaps and border constraints.
+    """
+    n = centers.shape[0]
+    forces = np.zeros_like(centers)
+    diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]
+    dist = np.linalg.norm(diff, axis=2) + np.eye(n)
+    sum_radii = radii[:, np.newaxis] + radii[np.newaxis, :]
+    overlap = sum_radii - dist
+    overlap_mask = (overlap > 0) & (np.eye(n) == 0)
+    direction = np.zeros_like(diff)
+    direction[overlap_mask] = diff[overlap_mask] / dist[overlap_mask][:, None]
+    force_magnitudes = np.zeros((n, n))
+    force_magnitudes[overlap_mask] = overlap[overlap_mask] / dist[overlap_mask]
+    forces += np.sum(direction * force_magnitudes[:, :, None], axis=1)
+    forces -= np.sum(direction * force_magnitudes[:, :, None], axis=0)
+    # Border forces
+    x, y = centers[:, 0], centers[:, 1]
+    r = radii
+    # Left
+    left_overlap = r - x
+    forces[:, 0] += np.where(left_overlap > 0, left_overlap, 0)
+    # Right
+    right_overlap = (x + r) - 1
+    forces[:, 0] -= np.where(right_overlap > 0, right_overlap, 0)
+    # Bottom
+    bottom_overlap = r - y
+    forces[:, 1] += np.where(bottom_overlap > 0, bottom_overlap, 0)
+    # Top
+    top_overlap = (y + r) - 1
+    forces[:, 1] -= np.where(top_overlap > 0, top_overlap, 0)
+    return forces
+
+def update_centers(centers, forces, alpha, momentum, prev_update):
+    """
+    Update centers with forces, step size, and momentum.
+    """
+    update = alpha * forces + momentum * prev_update
+    new_centers = centers + update
+    new_centers = np.clip(new_centers, 0.01, 0.99)
+    return new_centers, update
+
+def construct_packing():
+    """
+    Initialize and relax circle positions and radii.
+    """
+    centers = initialize_centers()
+    radii = compute_max_radii(centers)
+    alpha = 0.025
+    momentum = 0.5
+    prev_update = np.zeros_like(centers)
+    max_iters = 700
+    for _ in range(max_iters):
+        forces = compute_forces(centers, radii)
+        centers, prev_update = update_centers(centers, forces, alpha, momentum, prev_update)
+        radii = compute_max_radii(centers)
+        alpha *= 0.997
+    return centers, radii
+
+# This part remains fixed
+def run_packing():
+    centers, radii = construct_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

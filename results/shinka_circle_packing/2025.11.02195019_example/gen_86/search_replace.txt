@@ -1,0 +1,75 @@
+<NAME>
+adaptive_sa_and_final_relax</NAME>
+
+<DESCRIPTION>
+Add an adaptive annealing schedule in the SA loop to auto-tune the temperature based on recent improvements, and append a final constraint-aware repulsive force fine-tuning pass after local greedy refinement. This should help escape plateaus during annealing and resolve residual overlaps or gaps at the end, boosting overall packing density.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    T = 0.002
+=======
+    T = 0.002
+    # adaptive SA counters
+    improvement_counter = 0
+    no_improve_counter = 0
+    max_no_improve = 100
+    improvement_threshold = 1e-5
+>>>>>>> REPLACE
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+        # Cool down
+        T *= 0.995
+=======
+        # Adaptive temperature adjustment
+        if dE > 0 and abs(dE) > improvement_threshold:
+            improvement_counter += 1
+            no_improve_counter = 0
+        else:
+            no_improve_counter += 1
+        # Adjust temperature
+        if no_improve_counter >= max_no_improve:
+            T = min(T * 1.05, 0.01)
+            no_improve_counter = 0
+        elif improvement_counter >= 10:
+            T = max(T * 0.9, 1e-6)
+            improvement_counter = 0
+        else:
+            T *= 0.995
+>>>>>>> REPLACE
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+    return centers, radii
+=======
+    # Final constraint-aware repulsive force fine-tuning
+    alpha2 = 0.005
+    for it in range(100):
+        forces = np.zeros((n, 2))
+        for i in range(n):
+            for j in range(i+1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(*dxy) + 1e-8
+                allow = radii[i] + radii[j]
+                if dist < allow:
+                    overlap = (allow - dist) / dist
+                    forces[i] += dxy * overlap
+                    forces[j] -= dxy * overlap
+        for i in range(n):
+            x, y = centers[i]
+            r = radii[i]
+            if x - r < 0: forces[i,0] += r - x
+            if x + r > 1: forces[i,0] -= x + r - 1
+            if y - r < 0: forces[i,1] += r - y
+            if y + r > 1: forces[i,1] -= y + r - 1
+        centers += alpha2 * forces
+        centers = np.clip(centers, 0.01, 0.99)
+        radii = compute_max_radii(centers)
+        alpha2 *= 0.995
+
+    return centers, radii
+>>>>>>> REPLACE
+</DIFF>

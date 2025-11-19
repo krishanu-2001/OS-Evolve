@@ -1,0 +1,20 @@
+/home/yv2857/ShinkaEvolve
+Launching evaluation of function:
+_target_: examples.circle_packing.evaluate.main
+program_path: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/main.py
+results_dir: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/results
+
+Evaluating program: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/main.py
+Saving results to: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/results
+Evaluation error: cannot access local variable 'radii' where it is not associated with a value
+Correctness and error status saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/results/correct.json
+Metrics saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_1/results/metrics.json
+Evaluation or Validation failed: cannot access local variable 'radii' where it is not associated with a value
+Metrics:
+  combined_score: 0.0
+  execution_time_mean: 0.0
+  execution_time_std: 0.0
+  num_successful_runs: 0
+  num_valid_runs: 0
+  num_invalid_runs: 0
+  all_validation_errors: []

@@ -1,0 +1,16 @@
+Evaluating program: results/circle_packing/20251118_223402_weighted_fast/gen_2/main.py
+Saving results to: results/circle_packing/20251118_223402_weighted_fast/gen_2/results
+Run 1/1 completed in 41.00 seconds
+Detailed packing data saved to results/circle_packing/20251118_223402_weighted_fast/gen_2/results/extra.npz
+Correctness and error status saved to results/circle_packing/20251118_223402_weighted_fast/gen_2/results/correct.json
+Metrics saved to results/circle_packing/20251118_223402_weighted_fast/gen_2/results/metrics.json
+Evaluation and Validation completed successfully.
+Metrics:
+  combined_score: 1.9980835145608535
+  public: {'centers_str': '  centers[0] = (0.1250, 0.1250)\n  centers[1] = (0.1250, 0.3750)\n  centers[2] = (0.1250, 0.6250)\n  centers[3] = (0.1250, 0.8750)\n  centers[4] = (0.3750, 0.1250)\n  centers[5] = (0.3750, 0.3750)\n  centers[6] = (0.3750, 0.6250)\n  centers[7] = (0.3750, 0.8750)\n  centers[8] = (0.6250, 0.1250)\n  centers[9] = (0.6250, 0.3750)\n  centers[10] = (0.6250, 0.6250)\n  centers[11] = (0.6250, 0.8750)\n  centers[12] = (0.8750, 0.1250)\n  centers[13] = (0.8750, 0.3750)\n  centers[14] = (0.8750, 0.6250)\n  centers[15] = (0.8750, 0.8750)\n  centers[16] = (0.2500, 0.0700)\n  centers[17] = (0.7500, 0.0700)\n  centers[18] = (0.2500, 0.9300)\n  centers[19] = (0.7500, 0.9300)\n  centers[20] = (0.0700, 0.2500)\n  centers[21] = (0.0700, 0.7500)\n  centers[22] = (0.9300, 0.2500)\n  centers[23] = (0.9300, 0.7500)\n  centers[24] = (0.0700, 0.0700)\n  centers[25] = (0.9300, 0.9300)', 'num_circles': 26}
+  private: {'reported_sum_of_radii': 1.9980835145608535}
+  execution_time_mean: 41.00166415098647
+  execution_time_std: 0.0
+  num_valid_runs: 1
+  num_invalid_runs: 0
+  all_validation_errors: []

@@ -1,0 +1,80 @@
+<NAME>
+adaptive_sa_schedule
+</NAME>
+
+<DESCRIPTION>
+Implements an adaptive temperature schedule in the simulated annealing phase. We introduce a `no_improve` counter: if no improvement occurs for 100 iterations, we slightly increase the temperature (up to a maximum) to escape local minima; otherwise, we apply the usual cooling rate. This dynamic adjustment maintains a better exploration–exploitation balance and can lead to higher final packing densities.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    T = 0.002
+
+    for k in range(1500):
+        # multi‐circle moves every 100 iters, else single‐circle
+        if k % 100 == 0:
+            count = np.random.randint(2, 5)
+            idxs = np.random.choice(n, count, replace=False)
+        else:
+            idxs = [np.random.randint(n)]
+        old_pos = centers_sa[idxs].copy()
+        # decaying perturbation
+        scale = 0.006 * (1 - k / 1500)
+        delta = np.random.randn(len(idxs),2) * scale
+        centers_sa[idxs] = np.clip(centers_sa[idxs] + delta, 0.01, 0.99)
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = np.sum(radii_tmp)
+        dE = sum_new - sum_sa
+        # Metropolis acceptance
+        if dE > 0 or np.random.rand() < np.exp(dE / T):
+            sum_sa = sum_new
+            radii_sa = radii_tmp
+            if sum_new > best_sum + 1e-8:
+                best_sum = sum_new
+                best_centers = centers_sa.copy()
+                best_radii = radii_tmp.copy()
+        else:
+            centers_sa[idxs] = old_pos
+        # Cool down
+        T *= 0.995
+=======
+    T = 0.002
+    cooling_rate = 0.995
+    max_T = 0.01
+    no_improve = 0
+
+    for k in range(1500):
+        # multi‐circle moves every 100 iters, else single‐circle
+        if k % 100 == 0:
+            count = np.random.randint(2, 5)
+            idxs = np.random.choice(n, count, replace=False)
+        else:
+            idxs = [np.random.randint(n)]
+        old_pos = centers_sa[idxs].copy()
+        # decaying perturbation
+        scale = 0.006 * (1 - k / 1500)
+        delta = np.random.randn(len(idxs),2) * scale
+        centers_sa[idxs] = np.clip(centers_sa[idxs] + delta, 0.01, 0.99)
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = np.sum(radii_tmp)
+        dE = sum_new - sum_sa
+        # Metropolis acceptance
+        if dE > 0 or np.random.rand() < np.exp(dE / T):
+            sum_sa = sum_new
+            radii_sa = radii_tmp
+            no_improve = 0
+            if sum_new > best_sum + 1e-8:
+                best_sum = sum_new
+                best_centers = centers_sa.copy()
+                best_radii = radii_tmp.copy()
+        else:
+            centers_sa[idxs] = old_pos
+            no_improve += 1
+        # Adaptive cooling
+        if no_improve > 100:
+            T = min(T * 1.1, max_T)
+            no_improve = 0
+        else:
+            T *= cooling_rate
+>>>>>>> REPLACE
+</DIFF>

@@ -1,0 +1,108 @@
+<NAME>
+dynamic_hex_layouts
+</NAME>
+
+<DESCRIPTION>
+The current program only tries two fixed hexagonal layouts ([6,5,6,5,4] and [5,6,5,6,4]) and a radial layout as initial candidates. However, for n=26, there are several plausible ways to arrange 26 circles in a hexagonal grid with variable row counts. By dynamically generating all possible row combinations that sum to 26 and are "hex-like" (i.e., row counts differ by at most 2, and the number of rows is 4, 5, or 6), we can try a much richer set of initial layouts. This increases the chance of finding a better local optimum after refinement. This edit adds a function to enumerate such layouts and uses them as initial candidates, in addition to the radial layout.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        if init_methods is None:
+            self.init_methods = [
+                self._radial_layout,
+                self._hex_layout([6,5,6,5,4]),
+                self._hex_layout([5,6,5,6,4]),
+            ]
+        else:
+            self.init_methods = init_methods
+=======
+        if init_methods is None:
+            # Dynamically generate plausible hex layouts for n=26
+            self.init_methods = [self._radial_layout]
+            for rows in self._generate_hex_row_combinations(self.n):
+                self.init_methods.append(self._hex_layout(rows))
+        else:
+            self.init_methods = init_methods
+>>>>>>> REPLACE
+
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = 0.1
+            max_row = max(rows)
+            dx = (1-2*margin)/(max_row-1)
+            dy = dx*np.sqrt(3)/2
+            total_h = dy*(len(rows)-1)
+            y0 = (1-total_h)/2
+            pts = []
+            for i, cnt in enumerate(rows):
+                y = y0 + i*dy
+                row_w = dx*(cnt-1)
+                x0 = (1-row_w)/2
+                xs = x0 + np.arange(cnt)*dx
+                for x in xs:
+                    pts.append((x, y))
+            arr = np.array(pts)
+            if len(arr) > self.n:
+                return arr[:self.n]
+            elif len(arr) < self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr, pad])
+            return arr
+        return layout
+=======
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = 0.1
+            max_row = max(rows)
+            dx = (1-2*margin)/(max_row-1) if max_row > 1 else 1-2*margin
+            dy = dx*np.sqrt(3)/2
+            total_h = dy*(len(rows)-1)
+            y0 = (1-total_h)/2
+            pts = []
+            for i, cnt in enumerate(rows):
+                y = y0 + i*dy
+                row_w = dx*(cnt-1) if cnt > 1 else 0
+                x0 = (1-row_w)/2
+                xs = x0 + np.arange(cnt)*dx if cnt > 1 else np.array([x0])
+                for x in xs:
+                    pts.append((x, y))
+            arr = np.array(pts)
+            if len(arr) > self.n:
+                return arr[:self.n]
+            elif len(arr) < self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr, pad])
+            return arr
+        return layout
+
+    def _generate_hex_row_combinations(self, n: int) -> List[List[int]]:
+        """
+        Generate plausible hexagonal row count combinations that sum to n.
+        Only include layouts with 4-6 rows, row counts differ by at most 2,
+        and max row count is at least 4.
+        """
+        results = []
+        for num_rows in range(4, 7):
+            # Try all integer partitions of n into num_rows parts
+            def helper(sofar, left, rows_left):
+                if rows_left == 1:
+                    if left >= 1:
+                        candidate = sofar + [left]
+                        if max(candidate) - min(candidate) <= 2 and max(candidate) >= 4:
+                            results.append(candidate)
+                    return
+                for v in range(1, left - rows_left + 2):
+                    helper(sofar + [v], left - v, rows_left - 1)
+            helper([], n, num_rows)
+        # Remove duplicates and sort by "hex-likeness" (max-min, then max row)
+        results = list({tuple(sorted(r)): r for r in results}.values())
+        results.sort(key=lambda r: (max(r)-min(r), -max(r)))
+        return results
+>>>>>>> REPLACE
+
+</DIFF>

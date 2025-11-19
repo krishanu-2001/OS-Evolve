@@ -1,0 +1,216 @@
+# EVOLVE-BLOCK-START
+"""Enhanced circle packing for n=26 with multiple strategies and fine-tuning"""
+
+import numpy as np
+
+def construct_packing():
+    n = 26
+    margin = 0.02
+
+    # Define multiple initial layout functions
+    def hex_layout(rows):
+        def layout():
+            max_rows = max(rows)
+            dx = (1 - 2*margin) / max_rows if max_rows > 1 else 1 - 2*margin
+            dy = dx * np.sqrt(3) / 2
+            y_start = (1 + dy*(len(rows)-1)) / 2
+            points = []
+            for i, cnt in enumerate(rows):
+                y = y_start - i * dy
+                width = dx * (cnt - 1) if cnt > 1 else 0
+                x0 = (1 - width) / 2
+                for j in range(cnt):
+                    points.append([x0 + j*dx, y])
+            arr = np.array(points)
+            if len(arr) > n:
+                return arr[:n]
+            elif len(arr) < n:
+                extra = np.random.rand(n - len(arr), 2) * (1 - 2*margin) + margin
+                return np.vstack((arr, extra))
+            return arr
+        return layout
+
+    def radial_layout():
+        c = np.zeros((n,2))
+        c[0] = [0.5, 0.5]
+        for i in range(8):
+            θ = 2*np.pi*i/8 + np.pi/16
+            c[i+1] = [0.5+0.28*np.cos(θ), 0.5+0.28*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13 + np.pi/13
+            c[i+9] = [0.5+0.65*np.cos(θ), 0.5+0.65*np.sin(θ)]
+        for k, p in enumerate([(0.1,0.1), (0.9,0.1), (0.1,0.9), (0.9,0.9)], start=22):
+            c[k] = p
+        return c
+
+    def ring_layout():
+        c = np.zeros((n,2))
+        c[0] = [0.5, 0.5]
+        for i in range(8):
+            θ = 2*np.pi*i/8
+            c[i+1] = [0.5+0.3*np.cos(θ), 0.5+0.3*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13
+            c[i+9] = [0.5+0.65*np.cos(θ), 0.5+0.65*np.sin(θ)]
+        c[25] = [0.1, 0.1]
+        return c
+
+    # Generate multiple candidate initial layouts
+    candidate_rows = [
+        [6,5,6,5,4],
+        [5,6,5,6,4],
+        [6,6,5,5,4],
+        [5,5,6,6,4],
+        [6,5,5,6,4]
+    ]
+
+    seed_layouts = []
+    for r in candidate_rows:
+        seed_layouts.append(hex_layout(r))
+    seed_layouts.extend([radial_layout, ring_layout])
+
+    # Evaluate all initial layouts
+    best_sum = -np.inf
+    best_centers = None
+    best_radii = None
+    for init_fn in seed_layouts:
+        centers = np.clip(init_fn(), 0.0, 1.0)
+        radii = compute_max_radii(centers)
+        s = radii.sum()
+        if s > best_sum:
+            best_sum, best_centers, best_radii = s, centers.copy(), radii.copy()
+
+    # Adaptive simulated annealing parameters
+    max_iters = 6000
+    T_init = 0.02
+    alpha = 0.995
+    stagnation_limit = 150
+    rng = np.random.default_rng(42)
+
+    curr_centers = best_centers
+    curr_radii = best_radii
+    curr_score = curr_radii.sum()
+    T = T_init
+    stagnation_counter = 0
+
+    for t in range(max_iters):
+        p_multi = 0.2 if stagnation_counter < stagnation_limit else 0.5
+        sigma = self_sigma = 0.02 if stagnation_counter < stagnation_limit else 0.04
+
+        new_centers = curr_centers.copy()
+        if rng.random() < p_multi:
+            # perturb multiple centers
+            idx = rng.choice(n, size=np.random.randint(2,5), replace=False)
+            new_centers[idx] += (rng.uniform(-sigma, sigma, size=(len(idx),2)))
+        else:
+            i = rng.integers(n)
+            new_centers[i] += rng.uniform(-sigma, sigma, size=2)
+
+        new_centers = np.clip(new_centers, 0.0, 1.0)
+        new_radii = compute_max_radii(new_centers)
+        new_score = new_radii.sum()
+        delta = new_score - curr_score
+
+        if delta > 0 or rng.random() < np.exp(delta / T):
+            curr_centers, curr_radii, curr_score = new_centers, new_radii, new_score
+            if new_score > best_sum:
+                best_sum, best_centers, best_radii = new_score, new_centers, new_radii
+                stagnation_counter = 0
+            else:
+                stagnation_counter += 1
+        else:
+            stagnation_counter += 1
+        T *= alpha
+
+    # Final local greedy repositioning
+    c, r = curr_centers.copy(), curr_radii.copy()
+    for _ in range(2):
+        for i in range(n):
+            # sample around current
+            candidates = c[i] + (np.random.rand(10,2) - 0.5) * 0.12
+            candidates = np.clip(candidates, 0, 1)
+            best_radii = 0
+            best_p = c[i]
+            for p in candidates:
+                border_r = min(p[0], p[1], 1 - p[0], 1 - p[1])
+                dist = np.linalg.norm(c - p, axis=1)
+                min_d = dist[dist>0].min() if len(dist[dist>0])>0 else np.inf
+                cand_r = min(border_r, min_d - 1e-4)
+                if cand_r > best_radii:
+                    best_radii = cand_r
+                    best_p = p
+            c[i] = best_p
+        r = compute_max_radii(c)
+
+    # Physics-based force relaxation
+    c, r = force_relaxation(c, r, steps=80, margin=margin)
+
+    return c, r
+
+def compute_max_radii(centers):
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0], centers[:,1],
+        1 - centers[:,0], 1 - centers[:,1]
+    ])
+    for _ in range(15):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i]-centers[j])
+                if d <= 1e-8:
+                    if radii[i] > 0 or radii[j] > 0:
+                        radii[i], radii[j] = 0, 0
+                        changed=True
+                else:
+                    sum_r = radii[i] + radii[j]
+                    if sum_r > d:
+                        scale = d / sum_r
+                        new_r_i = radii[i] * scale
+                        new_r_j = radii[j] * scale
+                        if new_r_i < radii[i]:
+                            radii[i] = new_r_i
+                            changed = True
+                        if new_r_j < radii[j]:
+                            radii[j] = new_r_j
+                            changed = True
+        if not changed:
+            break
+    return radii
+
+def force_relaxation(centers, radii, steps=80, margin=0.02):
+    c = centers.copy()
+    r = radii.copy()
+    for _ in range(steps):
+        forces = np.zeros_like(c)
+        # pairwise repulsive Forces
+        for i in range(c.shape[0]):
+            for j in range(i+1, c.shape[0]):
+                vec = c[j] - c[i]
+                dist = np.linalg.norm(vec) + 1e-8
+                overlap = r[i] + r[j] - dist
+                if overlap > 0:
+                    dir = vec / dist
+                    f = 0.2 * overlap * dir
+                    forces[i] -= f
+                    forces[j] += f
+        # boundary force
+        for i in range(c.shape[0]):
+            for dim in [0,1]:
+                dist_left = c[i][dim] - r[i] - margin
+                if dist_left < 0:
+                    forces[i][dim] -= 0.2 * dist_left
+                dist_right = 1 - margin - (c[i][dim] + r[i])
+                if dist_right < 0:
+                    forces[i][dim] += 0.2 * dist_right
+        c += 0.1 * forces
+        c = np.clip(c, 0, 1)
+    # recompute radii after forces
+    r_new = compute_max_radii(c)
+    return c, r_new
+
+def run_packing():
+    centers, radii = construct_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii
+# EVOLVE-BLOCK-END

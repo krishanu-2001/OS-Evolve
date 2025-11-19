@@ -1,0 +1,60 @@
+<NAME>
+randomized_main_ring_radius
+</NAME>
+<DESCRIPTION>
+Instead of using a fixed ring radius of 0.29 for placing the main 8‐circle ring, slightly randomize it (±0.02) at each run. This variation in the initial structured layout increases diversity in initial conditions, helping escape poor local optima and improving overall packing performance.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    # 2. Place 8 in a main ring (radius chosen for good internal clearance)
+    main_ring_r = 0.29
+=======
+    # 2. Place 8 in a main ring (radius chosen for good internal clearance, randomized)
+    main_ring_r = 0.29 + np.random.uniform(-0.02, 0.02)
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+post_anneal_greedy_repack
+</NAME>
+<DESCRIPTION>
+After simulated annealing, perform a local greedy repacking sweep: for each circle, sample both local jitter and global positions to maximize its individual feasible radius while keeping other circles fixed. This fine‐tunes positions to fill small gaps and increases the total sum of radii.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    centers, radii = best_centers, best_radii
+    return centers, radii
+=======
+    centers, radii = best_centers, best_radii
+    # Stage 5: local greedy repacking sweep to further improve individual radii
+    def _greedy_repack_stage(c, samples=150):
+        n = c.shape[0]
+        for i in range(n):
+            # current radii and other circles
+            radii_all = compute_max_radii(c)
+            others = np.delete(c, i, axis=0)
+            other_rs = np.delete(radii_all, i)
+            best_p = c[i].copy()
+            best_r = radii_all[i]
+            # generate candidate points: local jitter and some global samples
+            local_pts = best_p + np.random.randn(samples, 2) * (best_r * 0.4 + 1e-6)
+            global_pts = np.random.rand(samples, 2) * 0.98 + 0.01
+            pts = np.vstack((local_pts, global_pts))
+            pts = np.clip(pts, 0.01, 0.99)
+            for p in pts:
+                # wall constraint
+                r_new = min(p[0], 1-p[0], p[1], 1-p[1])
+                # overlap constraint
+                if others.size > 0:
+                    d = np.linalg.norm(others - p, axis=1) - other_rs
+                    r_new = min(r_new, d.min())
+                if r_new > best_r:
+                    best_r = r_new
+                    best_p = p
+            c[i] = best_p
+        return c
+    centers = _greedy_repack_stage(centers)
+    radii = compute_max_radii(centers)
+    return centers, radii
+>>>>>>> REPLACE
+</DIFF>

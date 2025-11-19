@@ -1,0 +1,118 @@
+<NAME>
+post_anneal_local_greedy_repack
+</NAME>
+
+<DESCRIPTION>
+Add a post-processing stage after the final mini-annealing ("polish") phase that performs a local greedy repacking sweep. For each circle, it temporarily fixes the positions of all other circles and greedily searches (using a small grid and random samples) for a locally optimal position (maximizing its radius given the others). This can correct local suboptimalities left by global/annealing stages, as observed in the literature and prior top-performing packers. The new stage is called after _final_polish_stage and before returning the final result in construct_packing.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    centers = _final_polish_stage(centers, polish_iters, margin, layouts, rng)
+
+    radii = compute_max_radii(centers, margin)
+    return centers, radii
+=======
+    centers = _final_polish_stage(centers, polish_iters, margin, layouts, rng)
+
+    # ====== Stage 6: Local greedy repacking sweep ======
+    centers = _local_greedy_repack_stage(centers, margin, n_iter=1, rng=rng)
+
+    radii = compute_max_radii(centers, margin)
+    return centers, radii
+>>>>>>> REPLACE
+
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+def compute_max_radii(centers, margin=0.0):
+    """
+    Compute the maximal radii for given (n,2) centers, no-overlap and margin.
+    Refined: Iterates to full convergence not just fixed passes.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([centers[:,0]-margin, centers[:,1]-margin,
+                               1-margin-centers[:,0], 1-margin-centers[:,1]])
+    radii = np.clip(radii, 0, 1)
+    for _ in range(100):
+        old = radii.copy()
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d <= 1e-10:
+                    if radii[i]>0 or radii[j]>0:
+                        radii[i]=radii[j]=0.0
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        radii[i] *= scale
+                        radii[j] *= scale
+        if np.max(np.abs(radii-old)) < 1e-7:
+            break
+    return radii
+
+# EVOLVE-BLOCK-END
+=======
+def _local_greedy_repack_stage(centers, margin, n_iter=1, rng=None):
+    """
+    For each circle, locally maximize its radius by grid+random sampling, fixing others.
+    """
+    c = centers.copy()
+    n = c.shape[0]
+    for _ in range(n_iter):
+        for i in range(n):
+            arr_c = np.delete(c, i, axis=0)
+            arr_r = compute_max_radii(arr_c, margin)
+            best_r = -1.0
+            best_p = c[i].copy()
+            # grid + random
+            grid = np.linspace(margin, 1-margin, 5)
+            pts = np.stack(np.meshgrid(grid,grid), -1).reshape(-1,2)
+            if rng is not None:
+                pts = np.vstack([pts, rng.uniform(margin,1-margin,(20,2))])
+            else:
+                pts = np.vstack([pts, np.random.uniform(margin,1-margin,(20,2))])
+            for p in pts:
+                # wall limit
+                rr = min(p[0]-margin, p[1]-margin, 1-margin-p[0], 1-margin-p[1])
+                if arr_c.size:
+                    d = np.linalg.norm(arr_c - p,axis=1) - arr_r
+                    rr = min(rr, d.min())
+                if rr > best_r:
+                    best_r, best_p = rr, p
+            c[i] = best_p
+    return c
+
+def compute_max_radii(centers, margin=0.0):
+    """
+    Compute the maximal radii for given (n,2) centers, no-overlap and margin.
+    Refined: Iterates to full convergence not just fixed passes.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([centers[:,0]-margin, centers[:,1]-margin,
+                               1-margin-centers[:,0], 1-margin-centers[:,1]])
+    radii = np.clip(radii, 0, 1)
+    for _ in range(100):
+        old = radii.copy()
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d <= 1e-10:
+                    if radii[i]>0 or radii[j]>0:
+                        radii[i]=radii[j]=0.0
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        radii[i] *= scale
+                        radii[j] *= scale
+        if np.max(np.abs(radii-old)) < 1e-7:
+            break
+    return radii
+
+# EVOLVE-BLOCK-END
+>>>>>>> REPLACE
+
+</DIFF>

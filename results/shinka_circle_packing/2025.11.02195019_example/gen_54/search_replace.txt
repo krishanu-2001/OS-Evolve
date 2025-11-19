@@ -1,0 +1,54 @@
+<NAME>
+local_repack_sweep
+</NAME>
+<DESCRIPTION>
+Add a final local greedy repacking sweep method `_local_repack` inside `CirclePacker`.  After annealing, this routine iterates over each circle, samples candidate positions in a small neighborhood (using Gaussian probes scaled by `perturb_sigma`), and moves each circle to the position that maximizes its individual radius while keeping all others fixed.  This fine-tunes the configuration to capture small improvements around the annealed solution.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        return layout
+=======
+        return layout
+
+    def _local_repack(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = self.n
+        c = centers.copy()
+        # compute initial radii
+        radii = self._compute_radii(c)
+        # for each circle, probe local neighborhood to improve its radius
+        for i in range(n):
+            best_pos = c[i].copy()
+            best_r = radii[i]
+            # generate local probes around current position
+            probes = best_pos + np.random.randn(16, 2) * (self.perturb_sigma * 3)
+            probes = np.clip(probes, 0.0, 1.0)
+            for p in probes:
+                c_candidate = c.copy()
+                c_candidate[i] = p
+                # only need the radius of circle i at new position
+                r_cand = self._compute_radii(c_candidate)[i]
+                if r_cand > best_r:
+                    best_r = r_cand
+                    best_pos = p.copy()
+            c[i] = best_pos
+        # recompute full radii after all moves
+        r_final = self._compute_radii(c)
+        return c, r_final
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+invoke_local_repack
+</NAME>
+<DESCRIPTION>
+Modify the `_refine` method to invoke the new `_local_repack` sweep on the best solution found by simulated annealing before returning.  This ensures the final output includes the localized improvements from the repacking sweep.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        return best_c, best_r
+=======
+        # final local repack to refine placements
+        best_c, best_r = self._local_repack(best_c)
+        return best_c, best_r
+>>>>>>> REPLACE
+</DIFF>

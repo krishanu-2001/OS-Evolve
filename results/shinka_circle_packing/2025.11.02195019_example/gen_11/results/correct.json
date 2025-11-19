@@ -1,0 +1,4 @@
+{
+    "correct": false,
+    "error": "Validation failed: Sum of radii (nan) does not match reported (nan)"
+}

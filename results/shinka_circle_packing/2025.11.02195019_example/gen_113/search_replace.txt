@@ -1,0 +1,67 @@
+<NAME>
+add_localized_gap_filling_sampling_after_each_greedy_placement
+</NAME>
+
+<DESCRIPTION>
+Implement a targeted local dense sampling step immediately after each greedy placement during the local refinement phase.
+This aims to fill small interstices that the main sampling and annealing might miss, improving local packing density and increasing total radii sum.
+This builds upon the existing local greedy refinement step, honing in on neighborhoods around each circle for extra gains.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # Local greedy repacking sweep for fine detail
+    for i in range(n):
+        orig_pos = best_centers[i].copy()
+        for step in [0.01, 0.005, 0.0025, 0.001]:
+            for dx, dy in [
+                (step,0),(-step,0),(0,step),(0,-step),
+                (step,step),(step,-step),(-step,step),(-step,-step)
+            ]:
+                cand_centers = best_centers.copy()
+                cand_centers[i] = np.clip(orig_pos + np.array([dx, dy]), 0.01, 0.99)
+                cand_radii = compute_max_radii(cand_centers)
+                cand_sum = np.sum(cand_radii)
+                if cand_sum > best_sum:
+                    best_sum = cand_sum
+                    best_centers = cand_centers.copy()
+                    best_radii = cand_radii.copy()
+                    orig_pos = best_centers[i]
+        best_centers[i] = orig_pos
+=======
+    # Local greedy repacking sweep for fine detail
+    for i in range(n):
+        orig_pos = best_centers[i].copy()
+        for step in [0.01, 0.005, 0.0025, 0.001]:
+            for dx, dy in [
+                (step,0),(-step,0),(0,step),(0,-step),
+                (step,step),(step,-step),(-step,step),(-step,-step)
+            ]:
+                cand_centers = best_centers.copy()
+                cand_centers[i] = np.clip(orig_pos + np.array([dx, dy]), 0.01, 0.99)
+                cand_radii = compute_max_radii(cand_centers)
+                cand_sum = np.sum(cand_radii)
+                if cand_sum > best_sum:
+                    best_sum = cand_sum
+                    best_centers = cand_centers.copy()
+                    best_radii = cand_radii.copy()
+                    orig_pos = best_centers[i]
+        best_centers[i] = orig_pos
+
+        # Localized gap-filling sampling: try dense local perturbations near circle i
+        local_scale = step / 5
+        for _ in range(20):
+            dx, dy = (np.random.rand(2) - 0.5) * local_scale * 2
+            cand_centers = best_centers.copy()
+            cand_centers[i] = np.clip(orig_pos + np.array([dx, dy]), 0.01, 0.99)
+            cand_radii = compute_max_radii(cand_centers)
+            cand_sum = np.sum(cand_radii)
+            if cand_sum > best_sum:
+                best_sum = cand_sum
+                best_centers = cand_centers.copy()
+                best_radii = cand_radii.copy()
+                orig_pos = best_centers[i]
+        best_centers[i] = orig_pos
+>>>>>>> REPLACE
+
+</DIFF>

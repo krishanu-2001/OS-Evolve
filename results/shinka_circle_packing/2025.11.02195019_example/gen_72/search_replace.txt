@@ -1,0 +1,75 @@
+<NAME>
+localized_greedy_repack_final_sweep
+</NAME>
+
+<DESCRIPTION>
+Add a final greedy repack sweep after the main hill-climbing phase. For each circle, in turn, probe a set of candidate positions in a small neighborhood and greedily select the one that maximizes its radius (given the current positions of the other circles). This can help correct suboptimal placements left by the main optimization and exploit local gaps, as seen in the best-performing prior programs. The sweep is repeated for a few passes to allow for mutual adjustment. This approach is simple, robust, and often yields a measurable improvement in the sum of radii for dense packings.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    for t in range(iters):
+        # decaying step size
+        alpha = initial_alpha * (1 - t / iters)
+        i = int(rng.integers(n))
+        cand_centers = best_centers.copy()
+        # random perturbation
+        delta = rng.uniform(-alpha, alpha, size=2)
+        cand_centers[i] += delta
+        # keep inside margins
+        cand_centers[i] = np.clip(cand_centers[i], margin, 1 - margin)
+        # recompute radii & evaluate
+        cand_radii = compute_max_radii(cand_centers)
+        s = cand_radii.sum()
+        if s > best_sum:
+            best_sum     = s
+            best_centers = cand_centers
+            best_radii   = cand_radii
+
+    return best_centers, best_radii
+=======
+    for t in range(iters):
+        # decaying step size
+        alpha = initial_alpha * (1 - t / iters)
+        i = int(rng.integers(n))
+        cand_centers = best_centers.copy()
+        # random perturbation
+        delta = rng.uniform(-alpha, alpha, size=2)
+        cand_centers[i] += delta
+        # keep inside margins
+        cand_centers[i] = np.clip(cand_centers[i], margin, 1 - margin)
+        # recompute radii & evaluate
+        cand_radii = compute_max_radii(cand_centers)
+        s = cand_radii.sum()
+        if s > best_sum:
+            best_sum     = s
+            best_centers = cand_centers
+            best_radii   = cand_radii
+
+    # --- Final greedy repack sweep ---
+    repack_passes = 3
+    probe_count = 32
+    probe_radius = 0.11
+    for repack in range(repack_passes):
+        for i in range(n):
+            others = np.delete(best_centers, i, axis=0)
+            probes = best_centers[i] + rng.uniform(-probe_radius, probe_radius, (probe_count,2))
+            probes = np.clip(probes, margin, 1 - margin)
+            probes = np.vstack([probes, best_centers[i]])
+            max_rad = 0.
+            best_probe = best_centers[i]
+            for p in probes:
+                border_r = min(p[0]-margin, p[1]-margin, 1-margin-p[0], 1-margin-p[1])
+                sep = np.linalg.norm(others - p, axis=1)
+                safe_sep = sep.min() if len(sep)>0 else border_r
+                cand_r = min(border_r, safe_sep)
+                if cand_r > max_rad:
+                    max_rad = cand_r
+                    best_probe = p
+            best_centers[i] = best_probe
+        best_radii = compute_max_radii(best_centers)
+
+    return best_centers, best_radii
+>>>>>>> REPLACE
+
+</DIFF>

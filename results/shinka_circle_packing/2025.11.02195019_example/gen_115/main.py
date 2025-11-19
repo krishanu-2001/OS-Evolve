@@ -1,0 +1,250 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+
+def run_packing():
+    """Run the improved adaptive hybrid circle packing for n=26."""
+    centers, radii = adaptive_hybrid_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii
+
+def adaptive_hybrid_packing():
+    n = 26
+    rng = np.random.default_rng(42)
+    best_score = -np.inf
+    best_centers, best_radii = None, None
+
+    # Multiple diverse initializations
+    for _ in range(4):
+        centers = initialize_layout(rng, n)
+        centers = clip_centers(centers)
+        radii = compute_max_radii(centers)
+        centers, radii = refine_pipeline(centers, radii, rng)
+        score = radii.sum()
+        if score > best_score:
+            best_score = score
+            best_centers, best_radii = centers.copy(), radii.copy()
+    return best_centers, best_radii
+
+def initialize_layout(rng, n):
+    """Diverse initial layouts: hex, ring, corner, random."""
+    choice = rng.random()
+    if choice < 0.4:
+        return hex_layout(rng, n)
+    elif choice < 0.7:
+        return ring_layout(rng, n)
+    elif choice < 0.9:
+        return corner_layout(rng, n)
+    else:
+        return rng.uniform(0.02, 0.98, size=(n,2))
+
+def clip_centers(centers):
+    """Ensure centers are within bounds with margin."""
+    return np.clip(centers, 0.02, 0.98)
+
+def hex_layout(rng, n):
+    """Hex grid layout with random perturbations."""
+    max_rows = 5
+    row_counts = [6, 5, 6, 5, 4]
+    max_cols = max(row_counts)
+    dx = (1 - 0.04) / max_cols
+    dy = dx * np.sqrt(3)/2
+    centers = []
+    y0 = 0.5 - dy * (len(row_counts)-1)/2
+    for i, cnt in enumerate(row_counts):
+        y = y0 + i*dy
+        x0 = 0.5 - (cnt-1)*dx/2
+        for c in range(cnt):
+            x = x0 + c*dx
+            centers.append([x, y])
+    centers = np.array(centers)
+    # Add small random perturbations
+    centers += rng.uniform(-0.02, 0.02, centers.shape)
+    return centers
+
+def ring_layout(rng, n):
+    """Circles along two concentric rings."""
+    centers = []
+    centers.append([0.5, 0.5])  # center
+    for i in range(8):
+        θ = 2*np.pi*i/8
+        centers.append([0.5 + 0.3*np.cos(θ), 0.5 + 0.3*np.sin(θ)])
+    for i in range(13):
+        θ = 2*np.pi*i/13
+        centers.append([0.5 + 0.65*np.cos(θ), 0.5 + 0.65*np.sin(θ)])
+    # fill remaining with random points
+    while len(centers) < n:
+        centers.append(rng.uniform(0.02, 0.98, 2))
+    return np.array(centers[:n])
+
+def corner_layout(rng, n):
+    """Corners + edges distribution."""
+    centers = np.zeros((n,2))
+    corners = np.array([[0.02,0.02],[0.98,0.02],[0.02,0.98],[0.98,0.98]])
+    centers[:4] = corners
+    remaining = n - 4
+    per_side = remaining // 4
+    extras = remaining % 4
+    # bottom edge
+    for i in range(per_side + (1 if extras>0 else 0)):
+        t = (i+1)/(per_side + (1 if extras>0 else 0)+1)
+        centers[4+i] = [0.02 + t*0.96, 0.02]
+    # right edge
+    for i in range(per_side + (1 if extras>1 else 0)):
+        t = (i+1)/(per_side + (1 if extras>1 else 0)+1)
+        centers[4+per_side+i] = [0.98, 0.02 + t*0.96]
+    # top edge
+    for i in range(per_side + (1 if extras>2 else 0)):
+        t = (i+1)/(per_side + (1 if extras>2 else 0)+1)
+        centers[4+2*per_side+i] = [0.98 - t*0.96, 0.98]
+    # left edge
+    for i in range(per_side):
+        t = (i+1)/(per_side+1)
+        centers[4+3*per_side+i] = [0.02, 0.98 - t*0.96]
+    return centers
+
+def compute_max_radii(centers):
+    """Iterative relaxation to find maximal radii respecting borders and overlaps."""
+    radii = np.minimum.reduce([centers[:,0], centers[:,1], 1-centers[:,0], 1-centers[:,1]])
+    for _ in range(20):
+        changed = False
+        for i in range(len(centers)):
+            for j in range(i+1, len(centers)):
+                d = np.linalg.norm(centers[i]-centers[j])
+                if d < 1e-8:
+                    continue
+                sum_r = radii[i] + radii[j]
+                if sum_r > d:
+                    scale = d / sum_r
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    changed = True
+        if not changed:
+            break
+    return radii
+
+def refine_pipeline(centers, radii, rng):
+    """Main refinement pipeline: annealing + force relaxation + greedy adjustments."""
+    centers, radii = anneal_refinement(centers, radii, rng)
+    centers, radii = force_relaxation(centers, radii)
+    centers, radii = greedy_local_adjust(centers, radii, rng)
+    # global scaling to fill gaps
+    scale = compute_global_scale(centers, radii)
+    radii *= scale
+    return centers, radii
+
+def anneal_refinement(centers, radii, rng):
+    T_init, T_end = 1e-2, 1e-4
+    T = T_init
+    alpha = 0.995
+    best_centers, best_radii = centers.copy(), radii.copy()
+    best_score = radii.sum()
+    score = best_score
+    stagnation = 0
+    for step in range(1000):
+        p_multi = 0.4 if stagnation > 150 else 0.2
+        sigma = 0.02 if stagnation > 150 else 0.01
+        c_new = centers.copy()
+        if rng.random() < p_multi:
+            idxs = rng.choice(len(centers), size=3, replace=False)
+        else:
+            idxs = [rng.integers(len(centers))]
+        for i in idxs:
+            c_new[i] += rng.uniform(-sigma, sigma, 2)
+        c_new = clip_centers(c_new)
+        r_new = compute_max_radii(c_new)
+        s_new = r_new.sum()
+        dE = s_new - score
+        if dE > 0 or rng.random() < np.exp(dE / T):
+            centers, radii, score = c_new, r_new, s_new
+            if score > best_score:
+                best_score = score
+                best_centers, best_radii = c_new.copy(), r_new.copy()
+                stagnation = 0
+            else:
+                stagnation += 1
+        else:
+            stagnation += 1
+        T *= alpha
+    return best_centers, best_radii
+
+def force_relaxation(centers, radii):
+    """Physics-inspired force relaxation to improve packing."""
+    c = centers.copy()
+    for _ in range(30):
+        forces = np.zeros_like(c)
+        # pairwise repulsion
+        for i in range(len(c)):
+            for j in range(i+1, len(c)):
+                dv = c[j] - c[i]
+                d = np.linalg.norm(dv)
+                if d < 1e-8:
+                    continue
+                sum_r = radii[i] + radii[j]
+                if d < sum_r:
+                    overlap = sum_r - d
+                    dirv = dv/d if d>1e-8 else rng.normal(size=2)
+                    f = 0.2 * overlap * dirv
+                    forces[i] -= f
+                    forces[j] += f
+        # boundary forces
+        for i in range(len(c)):
+            for dim in range(2):
+                if c[i,dim] - radii[i] < 0.02:
+                    forces[i,dim] += 0.2*(0.02 - (c[i,dim]-radii[i]))
+                if c[i,dim] + radii[i] > 0.98:
+                    forces[i,dim] -= 0.2*((c[i,dim]+radii[i]) - 0.98)
+        c += 0.15 * forces
+        c = clip_centers(c)
+        radii = compute_max_radii(c)
+    return c, radii
+
+def greedy_local_adjust(centers, radii, rng):
+    """Local greedy adjustment: move each circle to maximize radius given others fixed."""
+    c = centers.copy()
+    for _ in range(2):
+        for i in range(len(c)):
+            best_r = 0
+            best_pos = c[i]
+            for _ in range(16):
+                candidate = c[i] + rng.uniform(-0.06, 0.06, 2)
+                candidate = np.clip(candidate, 0.02, 0.98)
+                # compute max radius at candidate
+                max_r = min(candidate[0], 1 - candidate[0], candidate[1], 1 - candidate[1])
+                for j in range(len(c)):
+                    if j == i:
+                        continue
+                    d = np.linalg.norm(candidate - c[j])
+                    max_r = min(max_r, d - radii[j])
+                if max_r > best_r:
+                    best_r = max_r
+                    best_pos = candidate
+            c[i] = best_pos
+    radii = compute_max_radii(c)
+    return c, radii
+
+def compute_global_scale(centers, radii):
+    """Compute maximum uniform scale to fit all circles without overlaps or border violations."""
+    factors = np.concatenate([
+        centers[:,0]/radii,
+        (1 - centers[:,0])/radii,
+        centers[:,1]/radii,
+        (1 - centers[:,1])/radii
+    ])
+    border_scale = np.min(factors)
+    # pairwise constraints
+    diff = centers[:,None,:] - centers[None,:,:]
+    dist = np.linalg.norm(diff, axis=2)
+    sum_r = radii[:,None] + radii[None,:]
+    mask = ~np.eye(len(centers), dtype=bool)
+    pair_scale = np.min((dist / sum_r)[mask])
+    return min(border_scale, pair_scale)
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

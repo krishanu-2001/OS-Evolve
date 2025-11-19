@@ -1,0 +1,60 @@
+<NAME>
+add_greedy_repack_stage
+</NAME>
+
+<DESCRIPTION>
+Introduce a new Stage 6 in `construct_packing` that performs a local greedy repacking sweep via `_greedy_repack_stage`. For each circle, it samples both global and local candidate positions to maximize that circle’s radius given all others fixed, correcting fine misplacements after annealing and physics. Also insert the helper `_greedy_repack_stage` just before `compute_max_radii`.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # ====== Stage 5: Final local polishing (mini-annealing, high temperature, small step) ======
+    centers = _final_polish_stage(centers, polish_iters, margin, layouts, rng)
+=======
+    # ====== Stage 5: Final local polishing (mini-annealing, high temperature, small step) ======
+    centers = _final_polish_stage(centers, polish_iters, margin, layouts, rng)
+    # ====== Stage 6: Local greedy repacking sweep ======
+    centers = _greedy_repack_stage(centers, margin, rng)
+>>>>>>> REPLACE
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+def compute_max_radii(centers, margin=0.0):
+=======
+def _greedy_repack_stage(centers, margin, rng, samples=200):
+    """
+    Local greedy repacking sweep: for each circle, sample candidate positions to maximize its radius.
+    """
+    import numpy as _np
+    n = centers.shape[0]
+    c = centers.copy()
+    for i in range(n):
+        best_r = -1.0
+        best_p = c[i].copy()
+        # fix all other circles
+        others = _np.delete(c, i, axis=0)
+        other_r = compute_max_radii(others, margin)
+        # generate candidates: half uniform global, half jittered local
+        pts_global = rng.uniform(margin, 1-margin, size=(samples//2, 2))
+        angles = rng.uniform(0, 2*_np.pi, samples//2)
+        offsets = rng.uniform(0, (1-2*margin)*0.1, samples//2)
+        pts_local = c[i] + _np.stack(( _np.cos(angles)*offsets, _np.sin(angles)*offsets ), axis=1)
+        pts_local = _np.clip(pts_local, margin, 1-margin)
+        pts = _np.vstack((pts_global, pts_local))
+        for p in pts:
+            # wall constraint
+            r = min(p[0]-margin, p[1]-margin, 1-margin-p[0], 1-margin-p[1])
+            # overlap constraint
+            if others.shape[0] > 0:
+                d = _np.linalg.norm(others - p, axis=1) - other_r
+                r = min(r, d.min())
+            if r > best_r:
+                best_r = r
+                best_p = p
+        c[i] = best_p
+    return c
+
+def compute_max_radii(centers, margin=0.0):
+>>>>>>> REPLACE
+</DIFF>

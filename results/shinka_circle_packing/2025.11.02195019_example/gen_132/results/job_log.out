@@ -1,0 +1,22 @@
+/home/yv2857/ShinkaEvolve
+Launching evaluation of function:
+_target_: examples.circle_packing.evaluate.main
+program_path: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/main.py
+results_dir: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/results
+
+Evaluating program: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/main.py
+Saving results to: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/results
+Run 1/1 completed in 20.82 seconds
+Detailed packing data saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/results/extra.npz
+Correctness and error status saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/results/correct.json
+Metrics saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_132/results/metrics.json
+Evaluation and Validation completed successfully.
+Metrics:
+  combined_score: 2.1963205618698622
+  public: {'centers_str': '  centers[0] = (0.2397, 0.0761)\n  centers[1] = (0.9316, 0.1330)\n  centers[2] = (0.1335, 0.9370)\n  centers[3] = (0.8939, 0.8287)\n  centers[4] = (0.2664, 0.1611)\n  centers[5] = (0.5068, 0.0681)\n  centers[6] = (0.7902, 0.0821)\n  centers[7] = (0.1074, 0.1075)\n  centers[8] = (0.0719, 0.4650)\n  centers[9] = (0.0755, 0.8115)\n  centers[10] = (0.7531, 0.4738)\n  centers[11] = (0.3725, 0.2770)\n  centers[12] = (0.6625, 0.2724)\n  centers[13] = (0.3469, 0.7941)\n  centers[14] = (0.2258, 0.5015)\n  centers[15] = (0.5103, 0.2257)\n  centers[16] = (0.2295, 0.2436)\n  centers[17] = (0.5016, 0.4580)\n  centers[18] = (0.0919, 0.3364)\n  centers[19] = (0.8723, 0.3122)\n  centers[20] = (0.9059, 0.5318)\n  centers[21] = (0.7522, 0.9295)\n  centers[22] = (0.5984, 0.9168)\n  centers[23] = (0.3739, 0.1071)\n  centers[24] = (0.7136, 0.7005)\n  centers[25] = (0.6298, 0.0949)', 'num_circles': 26}
+  private: {'reported_sum_of_radii': 2.1963205618698622}
+  execution_time_mean: 20.823907176963985
+  execution_time_std: 0.0
+  num_valid_runs: 1
+  num_invalid_runs: 0
+  all_validation_errors: []

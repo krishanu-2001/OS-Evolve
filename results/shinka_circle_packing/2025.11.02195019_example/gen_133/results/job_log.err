@@ -1,0 +1,37 @@
+Traceback (most recent call last):
+  File "/home/yv2857/ShinkaEvolve/shinka/eval_hydra.py", line 68, in <module>
+    hydra.utils.instantiate(cfg.evaluate_function)
+  File "/home/yv2857/ShinkaEvolve/.venv/lib/python3.11/site-packages/hydra/_internal/instantiate/_instantiate2.py", line 226, in instantiate
+    return instantiate_node(
+           ^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/.venv/lib/python3.11/site-packages/hydra/_internal/instantiate/_instantiate2.py", line 347, in instantiate_node
+    return _call_target(_target_, partial, args, kwargs, full_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/.venv/lib/python3.11/site-packages/hydra/_internal/instantiate/_instantiate2.py", line 92, in _call_target
+    return _target_(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/examples/circle_packing/evaluate.py", line 149, in main
+    metrics, correct, error_msg = run_shinka_eval(
+                                  ^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/shinka/core/wrap_eval.py", line 119, in run_shinka_eval
+    run_result = experiment_fn(**kwargs)
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_133/main.py", line 281, in run_packing
+    centers, radii = construct_packing()
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_133/main.py", line 12, in construct_packing
+    centers, radii = pipeline.run()
+                     ^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_133/main.py", line 44, in run
+    c = self._adaptive_simulated_annealing(c)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_133/main.py", line 192, in _adaptive_simulated_annealing
+    new_sum = compute_max_radii(c).sum()
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_133/main.py", line 258, in compute_max_radii
+    d = np.linalg.norm(dv)
+        ^^^^^^^^^^^^^^^^^^
+  File "/home/yv2857/ShinkaEvolve/.venv/lib/python3.11/site-packages/numpy/linalg/_linalg.py", line 2792, in norm
+    sqnorm = x.dot(x)
+             ^^^^^^^^
+KeyboardInterrupt

@@ -1,0 +1,386 @@
+--- a/original.py
++++ b/original.py
+@@ -1,153 +1,326 @@
+ # EVOLVE-BLOCK-START
+ import numpy as np
+ import math
+-
+-def greedy_initial(n, samples=8000, seed=0):
++from scipy.spatial import Voronoi
++
++def compute_radius_at(i, centers, radii):
++    x, y = centers[i]
++    r = min(x, y, 1-x, 1-y)
++    if len(centers) > 1:
++        others = np.delete(centers, i, axis=0)
++        rads  = np.delete(radii, i)
++        d = np.linalg.norm(others - centers[i], axis=1) - rads
++        r = min(r, d.min())
++    return max(r, 0.0)
++
++def compute_max_radii(centers):
++    n = centers.shape[0]
++    xs, ys = centers[:,0], centers[:,1]
++    radii = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
++    for _ in range(50):
++        max_change = 0.0
++        for i in range(n):
++            for j in range(i+1,n):
++                dxy = centers[i] - centers[j]
++                dist = np.hypot(dxy[0], dxy[1])
++                max_sum = radii[i] + radii[j]
++                if max_sum > dist and dist > 1e-10:
++                    scale = dist / (max_sum+1e-12)
++                    old_i, old_j = radii[i], radii[j]
++                    radii[i] *= scale
++                    radii[j] *= scale
++                    max_change = max(max_change, abs(radii[i]-old_i), abs(radii[j]-old_j))
++        if max_change < 1e-7:
++            break
++    return radii
++
++def gap_driven_greedy_initial(n, total_samples=9000, seed=0):
+     """
+-    Sequentially place n circles.
+-    At each step, sample 'samples' random points and pick the one
+-    with the largest feasible radius given existing circles.
++    Place n circles, alternating between uniform random sampling and
++    targeted sampling in largest local voids found via Voronoi analysis.
+     """
+     rnd = np.random.RandomState(seed)
+     centers = []
+     radii = []
+     for k in range(n):
+-        pts = rnd.rand(samples,2)
+-        best_r = -1.0
+-        best_p = None
++        # Alternate between uniform and gap-driven sampling
+         if k == 0:
+-            # for first circle just pick the best by walls
++            pts = rnd.rand(total_samples//4,2)
+             xs = pts[:,0]; ys = pts[:,1]
+             rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+             idx = np.argmax(rs)
+             best_r = rs[idx]; best_p = pts[idx]
+         else:
+             arr_centers = np.array(centers)
+             arr_radii = np.array(radii)
+-            for p in pts:
+-                # radius limited by walls
++            
++            # 1. Uniform random sampling for broad coverage
++            samples_uniform = total_samples // 5
++            pts_uniform = rnd.rand(samples_uniform,2)
++            best_r = -1.0
++            best_p = None
++            for p in pts_uniform:
+                 r = min(p[0], p[1], 1-p[0], 1-p[1])
+-                # limit by existing circles
+                 d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                 r = min(r, d.min())
+                 if r > best_r:
+                     best_r = r; best_p = p
++
++            # 2. Voronoi-based gap-driven sampling for local voids
++            if len(arr_centers) > 2:
++                try:
++                    vor = Voronoi(arr_centers)
++                    # For each Voronoi vertex inside the unit square, treat as a gap candidate
++                    candidates = []
++                    for v in vor.vertices:
++                        if (0<=v[0]<=1) and (0<=v[1]<=1):
++                            min_dist = np.linalg.norm(arr_centers - v, axis=1) - arr_radii
++                            r = min(v[0], v[1], 1-v[0], 1-v[1])
++                            r = min(r, min_dist.min())
++                            if r > 1e-4:
++                                candidates.append((r, v))
++                    candidates.sort(reverse=True)
++                    # For the top few largest voids, sample locally around them
++                    for r_cand, v in candidates[:min(7, len(candidates))]:
++                        pts_gap = v + (rnd.randn(total_samples//70,2)) * (0.18 * r_cand + 1e-4)
++                        pts_gap = np.clip(pts_gap, 0, 1)
++                        for p in pts_gap:
++                            r = min(p[0], p[1], 1-p[0], 1-p[1])
++                            d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
++                            r = min(r, d.min())
++                            if r > best_r:
++                                best_r = r; best_p = p
++                except Exception:
++                    pass  # Voronoi may fail for degenerate cases, just skip
++
++            # 3. Local jitter sampling around existing circles (to fill small gaps)
++            if k > n//2:
++                for i in range(len(arr_centers)):
++                    p0 = arr_centers[i]
++                    pts_local = p0 + (rnd.randn(total_samples//70,2)) * (0.25*arr_radii[i]+1e-4)
++                    pts_local = np.clip(pts_local, 0, 1)
++                    for p in pts_local:
++                        r = min(p[0], p[1], 1-p[0], 1-p[1])
++                        d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
++                        r = min(r, d.min())
++                        if r > best_r:
++                            best_r = r; best_p = p
++
+         centers.append(best_p)
+         radii.append(max(best_r, 1e-6))
+-    return np.array(centers), np.array(radii)
+-
+-def compute_radius_at(i, centers, radii):
+-    """
+-    Given center i, compute its maximal radius not overlapping others or walls.
+-    """
+-    x,y = centers[i]
+-    # wall limit
+-    r = min(x, y, 1-x, 1-y)
+-    if len(centers) > 1:
+-        # exclude self
+-        others = np.delete(centers, i, axis=0)
+-        rads  = np.delete(radii, i)
+-        d = np.linalg.norm(others - centers[i], axis=1) - rads
+-        r = min(r, d.min())
+-    return max(r, 0.0)
+-
+-def simulated_annealing(centers, radii, iters=12000, T0=0.1, Tend=1e-4, seed=1):
+-    """
+-    Refine placement by simulated annealing with single- and multi-center moves.
+-    """
++    centers = np.array(centers)
++    radii = np.array(radii)
++    # Local greedy repack after initial placement
++    centers, radii = local_greedy_repack(centers, radii, rnd)
++    return centers, radii
++
++def local_greedy_repack(centers, radii, rnd, iterations=3, samples=60):
++    centers = centers.copy()
++    radii = radii.copy()
++    n = len(centers)
++    for _ in range(iterations):
++        for i in range(n):
++            best_r = radii[i]
++            best_p = centers[i].copy()
++            for _ in range(samples):
++                candidate = centers[i] + (rnd.rand(2)*2 - 1) * (0.08*radii[i]+0.015)
++                candidate = np.clip(candidate, 0.0, 1.0)
++                # Compute max radius at candidate position
++                r = min(candidate[0], candidate[1], 1-candidate[0], 1-candidate[1])
++                if n > 1:
++                    others = np.delete(centers, i, axis=0)
++                    other_rs = np.delete(radii, i)
++                    d = np.linalg.norm(others - candidate, axis=1) - other_rs
++                    r = min(r, d.min())
++                if r > best_r:
++                    best_r = r
++                    best_p = candidate
++            centers[i] = best_p
++            radii[i] = best_r
++    return centers, radii
++
++def local_density(centers, i, radii):
++    # Estimate local density by counting neighbors within 2 radii
++    dists = np.linalg.norm(centers - centers[i], axis=1)
++    return np.count_nonzero((dists < 2.5*radii[i]) & (dists > 1e-8))
++
++def simulated_annealing_gap_cluster(centers, radii, iters=17000, T0=0.06, Tend=1e-5, seed=1):
+     rnd = np.random.RandomState(seed)
+     n = centers.shape[0]
+     best_centers = centers.copy()
+     best_radii = radii.copy()
+     best_sum = radii.sum()
+ 
+     curr_centers = centers.copy()
+     curr_radii = radii.copy()
+     curr_sum = best_sum
+     T = T0
+     decay = (Tend/T0)**(1.0/iters)
+ 
+-    # multi-move parameters
+-    multi_prob = 0.05
+-    multi_count = 3
+-    step_scale = 0.02
+-
+     for it in range(iters):
+-        if rnd.rand() < multi_prob:
+-            # multi-center perturbation
++        # With higher probability, pick highly-constrained (dense) regions for multi-moves
++        if rnd.rand() < 0.11:
++            # Pick a circle with highest local density
++            densities = np.array([local_density(curr_centers, i, curr_radii) for i in range(n)])
++            root = densities.argmax()
++            # Find closest neighbors (most tightly packed cluster)
++            dists = np.linalg.norm(curr_centers - curr_centers[root], axis=1)
++            neighbors = np.argsort(dists)[1:4]
++            idxs = np.concatenate(([root], neighbors))
++            old_ps = curr_centers[idxs].copy()
++            old_rs = curr_radii[idxs].copy()
++            # Small coordinated move
++            step_scale = 0.013 * (0.7 + 0.3*rnd.rand())
++            steps = rnd.randn(len(idxs), 2) * step_scale
++            curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
++            # Recompute radii for moved circles
++            new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
++            if (new_rs > 1e-8).all():
++                new_sum = curr_sum - old_rs.sum() + new_rs.sum()
++                delta = new_sum - curr_sum
++                if delta >= 0 or rnd.rand() < math.exp(delta / T):
++                    curr_radii[idxs] = new_rs
++                    curr_sum = new_sum
++                    if curr_sum > best_sum:
++                        best_sum = curr_sum
++                        best_centers[:] = curr_centers
++                        best_radii[:] = curr_radii
++                else:
++                    curr_centers[idxs] = old_ps
++            else:
++                curr_centers[idxs] = old_ps
++        elif rnd.rand() < 0.13:
++            # Random 2-4 circle cluster, for global escape
++            multi_count = rnd.randint(2, 5)
+             idxs = rnd.choice(n, multi_count, replace=False)
+             old_ps = curr_centers[idxs].copy()
+             old_rs = curr_radii[idxs].copy()
+-            # propose new positions
++            step_scale = 0.017 * (0.7 + 0.3*rnd.rand())
+             steps = rnd.randn(multi_count, 2) * step_scale
+             curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
+-            # recompute radii for moved circles
+             new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
+             if (new_rs > 1e-8).all():
+                 new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+                 delta = new_sum - curr_sum
+                 if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                     curr_radii[idxs] = new_rs
+                     curr_sum = new_sum
+                     if curr_sum > best_sum:
+                         best_sum = curr_sum
+                         best_centers[:] = curr_centers
+                         best_radii[:] = curr_radii
+                 else:
+                     curr_centers[idxs] = old_ps
+             else:
+                 curr_centers[idxs] = old_ps
+         else:
+-            # single-center perturbation
++            # Single circle move, step size adapts to local density
+             i = rnd.randint(n)
+             old_p = curr_centers[i].copy()
+             old_r = curr_radii[i]
++            dens = local_density(curr_centers, i, curr_radii)
++            # More crowded: smaller step; less crowded: larger step
++            step_scale = 0.012 * (1.1 - 0.11*min(dens, 7)) * (0.7 + 0.3*rnd.rand())
+             step = rnd.randn(2) * step_scale
+             new_p = np.clip(old_p + step, 0.0, 1.0)
+             curr_centers[i] = new_p
+             new_r = compute_radius_at(i, curr_centers, curr_radii)
+             if new_r <= 1e-8:
+                 curr_centers[i] = old_p
+             else:
+                 new_sum = curr_sum - old_r + new_r
+                 delta = new_sum - curr_sum
+                 if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                     curr_radii[i] = new_r
+                     curr_sum = new_sum
+                     if curr_sum > best_sum:
+                         best_sum = curr_sum
+                         best_centers[:] = curr_centers
+                         best_radii[:] = curr_radii
+                 else:
+                     curr_centers[i] = old_p
+-        # cool down
+         T *= decay
+-
+     return best_centers, best_radii
+ 
++def micro_force_adjustment(centers, radii, steps=60):
++    """
++    Final micro-adjustment: constraint-aware force-based nudge,
++    strictly accepting only non-overlapping, in-boundary moves.
++    """
++    n = centers.shape[0]
++    for it in range(steps):
++        forces = np.zeros((n,2))
++        # Repulsive force for overlaps
++        for i in range(n):
++            for j in range(i+1,n):
++                dxy = centers[i] - centers[j]
++                dist = np.hypot(dxy[0], dxy[1]) + 1e-10
++                min_dist = radii[i] + radii[j]
++                if dist < min_dist:
++                    overlap = min_dist - dist
++                    f = dxy / dist * overlap * 0.13
++                    forces[i] += f
++                    forces[j] -= f
++        # Attractive force for circles not touching but in sparse regions
++        for i in range(n):
++            local_r = radii[i]
++            dists = np.linalg.norm(centers - centers[i], axis=1)
++            if np.all(dists > local_r*2.2):
++                # Nudge toward center
++                center_dir = np.array([0.5,0.5]) - centers[i]
++                forces[i] += center_dir * 0.02
++        # Border repulsion
++        for i in range(n):
++            x,y = centers[i]
++            r = radii[i]
++            if x-r < 0:
++                forces[i,0] += (r-x+1e-4)*0.5
++            if x+r > 1:
++                forces[i,0] -= (x+r-1+1e-4)*0.5
++            if y-r < 0:
++                forces[i,1] += (r-y+1e-4)*0.5
++            if y+r > 1:
++                forces[i,1] -= (y+r-1+1e-4)*0.5
++        # Update positions
++        new_centers = centers + 0.13*forces
++        # Constraint check: accept only non-overlapping, in-bounds moves
++        for i in range(n):
++            candidate = np.clip(new_centers[i], 0.0, 1.0)
++            # Check overlap
++            ok = True
++            for j in range(n):
++                if i==j: continue
++                if np.linalg.norm(candidate - centers[j]) < (radii[i]+radii[j]-1e-6):
++                    ok = False
++                    break
++            if ok:
++                centers[i] = candidate
++        # Recompute radii
++        radii = compute_max_radii(centers)
++    return centers, radii
++
+ def construct_packing():
+-    """
+-    Build and optimize 26-circle packing via greedy initialization
+-    followed by simulated annealing refinement.
+-    """
+     n = 26
+-    # Phase 1: greedy placement
+-    centers, radii = greedy_initial(n, samples=8000, seed=42)
+-    # Phase 2: simulated annealing
+-    centers, radii = simulated_annealing(centers, radii,
+-                                         iters=15000,
+-                                         T0=0.05,
+-                                         Tend=1e-5,
+-                                         seed=999)
++    # Phase 1: gap-driven greedy with Voronoi void detection
++    centers, radii = gap_driven_greedy_initial(n, total_samples=9500, seed=42)
++    # Phase 2: simulated annealing with context-aware multi-circle moves
++    centers, radii = simulated_annealing_gap_cluster(
++        centers, radii,
++        iters=17000,
++        T0=0.06,
++        Tend=1e-5,
++        seed=2024)
++    # Phase 3: final constraint-aware micro-adjustment
++    centers, radii = micro_force_adjustment(centers, radii, steps=70)
+     return centers, radii
+ 
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

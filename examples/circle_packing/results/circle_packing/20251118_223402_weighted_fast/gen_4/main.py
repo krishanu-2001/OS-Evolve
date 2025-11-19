@@ -1,0 +1,186 @@
+# EVOLVE-BLOCK-START
+"""Constructor-based circle packing for n=26 circles"""
+
+import numpy as np
+
+
+def construct_packing():
+    """
+    Construct a specific arrangement of 26 circles in a unit square
+    that attempts to maximize the sum of their radii.
+
+    Returns:
+        Tuple of (centers, radii, sum_of_radii)
+        centers: np.array of shape (26, 2) with (x, y) coordinates
+        radii: np.array of shape (26) with radius of each circle
+        sum_of_radii: Sum of all radii
+    """
+    # Initialize arrays for 26 circles
+    n = 26
+    centers = np.zeros((n, 2))
+
+    # Place circles in a structured pattern using a hybrid approach
+    # This design aims for a better initial distribution than simple rings.
+    idx = 0
+
+    # 1. Central 4x4 array (16 circles)
+    # Tightly packed central grid, adjusted slightly to allow larger radii
+    x_coords_center = np.linspace(0.2, 0.8, 4)
+    y_coords_center = np.linspace(0.2, 0.8, 4)
+    for x in x_coords_center:
+        for y in y_coords_center:
+            centers[idx] = [x, y]
+            idx += 1
+
+    # 2. Four circles near the corners (4 circles)
+    # Placed slightly in from the actual corners
+    corner_offset = 0.1
+    centers[idx] = [corner_offset, corner_offset]
+    idx += 1
+    centers[idx] = [1 - corner_offset, corner_offset]
+    idx += 1
+    centers[idx] = [corner_offset, 1 - corner_offset]
+    idx += 1
+    centers[idx] = [1 - corner_offset, 1 - corner_offset]
+    idx += 1
+
+    # 3. Six edge circles (2 on top, 2 on bottom, 1 on left, 1 on right)
+    # Symmetrically placed on edges
+    edge_mid_offset = 0.1 # Distance from the edge
+    edge_x_positions = [0.35, 0.65] # For the two circles on top/bottom edges
+
+    # Bottom edge circles
+    centers[idx] = [edge_x_positions[0], edge_mid_offset]
+    idx += 1
+    centers[idx] = [edge_x_positions[1], edge_mid_offset]
+    idx += 1
+
+    # Top edge circles
+    centers[idx] = [edge_x_positions[0], 1 - edge_mid_offset]
+    idx += 1
+    centers[idx] = [edge_x_positions[1], 1 - edge_mid_offset]
+    idx += 1
+
+    # Left edge midpoint circle
+    centers[idx] = [edge_mid_offset, 0.5]
+    idx += 1
+
+    # Right edge midpoint circle
+    centers[idx] = [1 - edge_mid_offset, 0.5]
+    idx += 1
+
+    # Initial clipping to ensure centers are within the square
+    # This acts as a safety net for initial explicit placement.
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # Iterative refinement of center positions (physics-based model)
+    # This simulates forces to push circles away from boundaries and each other.
+    num_iterations = 250 # Number of steps for refinement (increased from initial 200)
+    learning_rate = 0.003 # Step size for center adjustments (slightly reduced for stability)
+    wall_repulsion_strength = 1.2 # Tunable strength for wall repulsion (increased slightly)
+    overlap_repulsion_strength = 0.6 # Tunable strength for circle repulsion (increased slightly)
+
+    for iteration in range(num_iterations):
+        # Calculate radii for the current center positions, resolving any overlaps
+        radii = compute_max_radii(centers)
+
+        forces = np.zeros_like(centers)
+
+        # Apply repulsion forces from square boundaries
+        for i in range(n):
+            x, y = centers[i]
+            r = radii[i]
+
+            # Horizontal forces: push away from left/right walls if overlapping
+            if x - r < 0:
+                forces[i, 0] += wall_repulsion_strength * (r - x)
+            if x + r > 1:
+                forces[i, 0] += wall_repulsion_strength * (1 - (x + r))
+
+            # Vertical forces: push away from bottom/top walls if overlapping
+            if y - r < 0:
+                forces[i, 1] += wall_repulsion_strength * (r - y)
+            if y + r > 1:
+                forces[i, 1] += wall_repulsion_strength * (1 - (y + r))
+
+        # Apply repulsion forces from overlapping circles
+        for i in range(n):
+            for j in range(i + 1, n):
+                vec = centers[i] - centers[j]
+                dist = np.sqrt(np.sum(vec ** 2))
+
+                # If circles overlap
+                if dist < (radii[i] + radii[j]):
+                    overlap_amount = (radii[i] + radii[j]) - dist
+
+                    # Avoid division by zero if centers are too close
+                    if dist < 1e-6:
+                        # Apply force in an arbitrary direction to resolve exact overlap
+                        direction = np.array([np.cos(i * np.pi / n), np.sin(i * np.pi / n)])
+                    else:
+                        direction = vec / dist
+
+                    # Apply force proportional to overlap
+                    force_magnitude = overlap_amount * overlap_repulsion_strength
+                    forces[i] += direction * force_magnitude
+                    forces[j] -= direction * force_magnitude # Equal and opposite force
+
+        # Update centers based on accumulated forces
+        centers += forces * learning_rate
+
+        # Ensure centers always remain within the unit square [0, 1]
+        # Allow circles to touch boundaries, so clip to [0,1]
+        centers = np.clip(centers, 0.0, 1.0)
+
+    # Final computation of radii after all center adjustments
+    radii = compute_max_radii(centers)
+    return centers, radii
+
+
+def compute_max_radii(centers):
+    """
+    Compute the maximum possible radii for each circle position
+    such that they don't overlap and stay within the unit square.
+
+    Args:
+        centers: np.array of shape (n, 2) with (x, y) coordinates
+
+    Returns:
+        np.array of shape (n) with radius of each circle
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+
+    # First, limit by distance to square borders
+    for i in range(n):
+        x, y = centers[i]
+        # Distance to borders
+        radii[i] = min(x, y, 1 - x, 1 - y)
+
+    # Then, limit by distance to other circles
+    # Each pair of circles with centers at distance d can have
+    # sum of radii at most d to avoid overlap
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+
+            # If current radii would cause overlap
+            if radii[i] + radii[j] > dist:
+                # Scale both radii proportionally
+                scale = dist / (radii[i] + radii[j])
+                radii[i] *= scale
+                radii[j] *= scale
+
+    return radii
+
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

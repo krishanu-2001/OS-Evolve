@@ -1,0 +1,4 @@
+{
+    "correct": false,
+    "error": "'HybridCirclePacker' object has no attribute '_local_sampling_refinement'"
+}

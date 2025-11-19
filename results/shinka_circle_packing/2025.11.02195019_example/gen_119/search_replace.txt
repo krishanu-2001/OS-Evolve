@@ -1,0 +1,190 @@
+<adaptive_clustered_sim_annealing_improved_move_strategy>
+Adaptive clustered simulated annealing: add periodic multi-circle cluster moves with smaller step sizes and increase max iterations
+
+This edit improves the simulated annealing phase by introducing periodic multi-circle cluster moves every 100 iterations, allowing coordinated small adjustments of 2-3 neighboring circles simultaneously. This helps escape local minima inaccessible by single moves or large cluster moves alone. The step size for cluster moves is reduced to allow finer adjustments. The max iterations are increased to 12000 to allow more exploration. These changes leverage the insight that multi-circle coordinated moves can improve packing quality by better local rearrangements.
+</adaptive_clustered_sim_annealing_improved_move_strategy>
+
+<DIFF>
+<<<<<<< SEARCH
+def adaptive_simulated_annealing(centers, radii, margin, rng):
+    """
+    Perform adaptive simulated annealing with cluster moves and adaptive temperature schedule.
+    """
+    n = centers.shape[0]
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_score = np.sum(radii)
+
+    current_centers = centers.copy()
+    current_radii = radii.copy()
+    current_score = best_score
+
+    # KD-tree for neighbor queries
+    tree = cKDTree(current_centers)
+
+    T_init = 1e-2
+    T_min = 1e-5
+    T = T_init
+
+    max_iters = 8000
+    stagnation = 0
+    max_stagn = 400
+    alpha_fast = 0.995
+    alpha_slow = 0.9995
+
+    for it in range(max_iters):
+        # Adaptive temperature decay
+        if stagnation < max_stagn:
+            T *= alpha_slow
+        else:
+            T *= alpha_fast
+        if T < T_min:
+            T = T_min
+
+        candidate_centers = current_centers.copy()
+
+        # Decide cluster or single move
+        if rng.uniform() < 0.25:
+            # Cluster move: select a random circle and move it and its neighbors
+            idx = rng.integers(n)
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+            # limit cluster size to max 4
+            if len(neighbors) > 4:
+                neighbors = rng.choice(neighbors, size=4, replace=False)
+            step_size = 0.02 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+        else:
+            # Single circle move
+            idx = rng.integers(n)
+            step_size = 0.03 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            candidate_centers[idx] += delta
+            candidate_centers[idx] = np.clip(candidate_centers[idx], margin, 1 - margin)
+
+        candidate_radii = compute_max_radii(candidate_centers)
+        candidate_score = np.sum(candidate_radii)
+        dE = candidate_score - current_score
+
+        if dE > 0 or rng.uniform() < np.exp(dE / T):
+            current_centers = candidate_centers
+            current_radii = candidate_radii
+            current_score = candidate_score
+            tree = cKDTree(current_centers)
+            if current_score > best_score:
+                best_centers = current_centers.copy()
+                best_radii = current_radii.copy()
+                best_score = current_score
+                stagnation = 0
+            else:
+                stagnation += 1
+        else:
+            stagnation += 1
+
+        # Restart temperature if stagnation too long to escape local minima
+        if stagnation > 1000:
+            T = T_init
+            stagnation = 0
+
+    return best_centers, best_radii
+=======
+def adaptive_simulated_annealing(centers, radii, margin, rng):
+    """
+    Perform adaptive simulated annealing with cluster moves and adaptive temperature schedule.
+    """
+    n = centers.shape[0]
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_score = np.sum(radii)
+
+    current_centers = centers.copy()
+    current_radii = radii.copy()
+    current_score = best_score
+
+    # KD-tree for neighbor queries
+    tree = cKDTree(current_centers)
+
+    T_init = 1e-2
+    T_min = 1e-5
+    T = T_init
+
+    max_iters = 12000
+    stagnation = 0
+    max_stagn = 400
+    alpha_fast = 0.995
+    alpha_slow = 0.9995
+
+    for it in range(max_iters):
+        # Adaptive temperature decay
+        if stagnation < max_stagn:
+            T *= alpha_slow
+        else:
+            T *= alpha_fast
+        if T < T_min:
+            T = T_min
+
+        candidate_centers = current_centers.copy()
+
+        # Periodic multi-circle cluster move every 100 iterations
+        if it % 100 == 0:
+            idx = rng.integers(n)
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+            if len(neighbors) > 3:
+                neighbors = rng.choice(neighbors, size=3, replace=False)
+            step_size = 0.01 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+        else:
+            # Decide cluster or single move
+            if rng.uniform() < 0.25:
+                # Cluster move: select a random circle and move it and its neighbors
+                idx = rng.integers(n)
+                neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+                # limit cluster size to max 4
+                if len(neighbors) > 4:
+                    neighbors = rng.choice(neighbors, size=4, replace=False)
+                step_size = 0.02 * (T / T_init)**0.5
+                delta = rng.uniform(-step_size, step_size, size=2)
+                for i in neighbors:
+                    candidate_centers[i] += delta
+                    candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+            else:
+                # Single circle move
+                idx = rng.integers(n)
+                step_size = 0.03 * (T / T_init)**0.5
+                delta = rng.uniform(-step_size, step_size, size=2)
+                candidate_centers[idx] += delta
+                candidate_centers[idx] = np.clip(candidate_centers[idx], margin, 1 - margin)
+
+        candidate_radii = compute_max_radii(candidate_centers)
+        candidate_score = np.sum(candidate_radii)
+        dE = candidate_score - current_score
+
+        if dE > 0 or rng.uniform() < np.exp(dE / T):
+            current_centers = candidate_centers
+            current_radii = candidate_radii
+            current_score = candidate_score
+            tree = cKDTree(current_centers)
+            if current_score > best_score:
+                best_centers = current_centers.copy()
+                best_radii = current_radii.copy()
+                best_score = current_score
+                stagnation = 0
+            else:
+                stagnation += 1
+        else:
+            stagnation += 1
+
+        # Restart temperature if stagnation too long to escape local minima
+        if stagnation > 1000:
+            T = T_init
+            stagnation = 0
+
+    return best_centers, best_radii
+>>>>>>> REPLACE
+
+</DIFF>

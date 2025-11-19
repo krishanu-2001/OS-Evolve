@@ -1,0 +1,119 @@
+# EVOLVE-BLOCK-START
+"""Hybrid force-based circle packing with adaptive relaxation for n=26"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Construct and optimize an arrangement of 26 circles in a unit square
+    using an adaptive force-relaxation algorithm to maximize the sum of radii.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    np.random.seed(42)
+    n = 26
+
+    # 1) Initialize on a structured grid with jitter
+    gx = np.linspace(0.2, 0.8, 6)
+    gy = np.linspace(0.2, 0.8, 5)
+    pts = np.array([(x, y) for x in gx for y in gy])
+    centers = pts[:n].copy()
+    centers += (np.random.rand(n, 2) - 0.5) * 0.04
+    centers = np.clip(centers, 0.02, 0.98)
+
+    # 2) Iterative force relaxation with adaptive parameters
+    radii = compute_max_radii(centers)
+    step_size = 0.05
+    decay = 0.998
+    for it in range(800):
+        forces = np.zeros((n, 2))
+        # Pairwise repulsion
+        for i in range(n):
+            for j in range(i + 1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1]) + 1e-8
+                max_sum = radii[i] + radii[j]
+                if dist < max_sum:
+                    overlap = (max_sum - dist) / dist
+                    force_vec = dxy * overlap
+                    forces[i] += force_vec
+                    forces[j] -= force_vec
+        # Border forces with adaptive threshold
+        for i in range(n):
+            x, y = centers[i]
+            r = radii[i]
+            # Left border
+            if x - r < 0:
+                forces[i, 0] += (r - x) * 1.5
+            # Right border
+            if x + r > 1:
+                forces[i, 0] -= (x + r - 1) * 1.5
+            # Bottom border
+            if y - r < 0:
+                forces[i, 1] += (r - y) * 1.5
+            # Top border
+            if y + r > 1:
+                forces[i, 1] -= (y + r - 1) * 1.5
+        # Update centers
+        centers += step_size * forces
+        centers = np.clip(centers, 0.02, 0.98)
+        # Recompute radii
+        radii_new = compute_max_radii(centers)
+        # Check for convergence
+        if np.max(np.abs(radii_new - radii)) < 1e-4:
+            break
+        radii = radii_new
+        step_size *= decay  # decay step size for stability
+
+    # Final local refinement: iterative pairwise adjustment
+    for _ in range(10):
+        radii = compute_max_radii(centers)
+        # Slightly relax radii to maximize sum
+        radii += 0.0005
+        radii = np.minimum(radii, 0.2)  # limit max radius for stability
+        # Enforce non-overlap by shrinking if needed
+        for i in range(n):
+            for j in range(i + 1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1]) + 1e-8
+                max_sum = radii[i] + radii[j]
+                if max_sum > dist:
+                    scale = dist / max_sum
+                    radii[i] *= scale
+                    radii[j] *= scale
+        # Clip radii to ensure within bounds
+        radii = np.clip(radii, 0.01, 0.2)
+
+    return centers, radii
+
+def compute_max_radii(centers):
+    """
+    Given fixed centers, compute maximum radii so circles stay within [0,1]^2
+    and do not overlap, with a few relaxation passes.
+    """
+    n = centers.shape[0]
+    xs, ys = centers[:,0], centers[:,1]
+    radii = np.minimum.reduce([xs, ys, 1 - xs, 1 - ys])
+    # Relax pairwise constraints
+    for _ in range(8):
+        for i in range(n):
+            for j in range(i + 1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1]) + 1e-8
+                max_sum = radii[i] + radii[j]
+                if max_sum > dist:
+                    scale = dist / max_sum
+                    radii[i] *= scale
+                    radii[j] *= scale
+    return radii
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

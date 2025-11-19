@@ -1,0 +1,169 @@
+# EVOLVE-BLOCK-START
+"""Enhanced modular stage-based circle packing with adaptive heuristics (n=26)"""
+
+import numpy as np
+
+def construct_packing():
+    n = 26
+    margin = 0.02
+    rng = np.random.default_rng(202406)
+    layouts = [
+        [6,5,6,5,4],
+        [5,6,5,6,4],
+        [6,6,5,5,4],
+        [5,5,6,6,4],
+        [6,5,5,6,4]
+    ]
+
+    # Stage 1: Structured initial layout
+    centers = _structured_initial(n, margin, layouts, rng)
+
+    # Stage 2: Physics relaxation
+    centers = _physics_relaxation(centers, margin, steps=50, rng=rng)
+
+    # Stage 3: Adaptive staged optimization
+    centers = _adaptive_staged_optimization(centers, margin, layouts, rng)
+
+    # Final greedy local refinement
+    centers = _local_greedy_refinement(centers, margin, rng)
+
+    radii = compute_max_radii(centers, margin)
+    return centers, radii
+
+def _structured_initial(n, margin, layouts, rng):
+    max_cols = max(map(len, layouts))
+    dx = (1 - 2*margin) / max_cols
+    h = dx * np.sqrt(3) / 2
+    centers = np.zeros((n,2))
+    idx = 0
+    for rid, row in enumerate(layouts):
+        x0 = margin + (max_cols - len(row))*dx/2
+        y = margin + rid*h
+        for c in row:
+            centers[idx] = [x0 + c*dx, y]
+            idx += 1
+    centers += rng.normal(0, 0.0002, centers.shape)
+    centers = np.clip(centers, margin+0.001, 1 - margin - 0.001)
+    return centers
+
+def _physics_relaxation(centers, margin, steps, rng):
+    c = centers.copy()
+    for _ in range(steps):
+        forces = np.zeros_like(c)
+        n = c.shape[0]
+        rads = compute_max_radii(c, margin)
+        # Pairwise repulsion
+        for i in range(n):
+            for j in range(i+1, n):
+                dv = c[j] - c[i]
+                dist = np.linalg.norm(dv)
+                min_d = rads[i] + rads[j] + 1e-6
+                if dist < min_d:
+                    dirv = dv/dist if dist>1e-8 else rng.normal(size=2)
+                    overlap = min_d - dist
+                    f = 0.2 * overlap * dirv
+                    forces[i] -= f
+                    forces[j] += f
+        # Boundary forces
+        for i in range(n):
+            x,y = c[i]
+            r = rads[i]
+            if x - r < margin:
+                forces[i,0] += 0.2 * (margin - (x - r))
+            if x + r > 1 - margin:
+                forces[i,0] -= 0.2 * ((x + r) - (1 - margin))
+            if y - r < margin:
+                forces[i,1] += 0.2 * (margin - (y - r))
+            if y + r > 1 - margin:
+                forces[i,1] -= 0.2 * ((y + r) - (1 - margin))
+        c += 0.15 * forces
+        np.clip(c, margin+0.001, 1 - margin - 0.001, out=c)
+    return c
+
+def _adaptive_staged_optimization(centers, margin, layouts, rng):
+    c = centers.copy()
+    n = c.shape[0]
+    # Parameters
+    total_iters = 1500
+    # Initialize temperature schedule
+    T0, T_end = 0.012, 0.0002
+    for k in range(total_iters):
+        # Dynamic temperature
+        T = T0 * ((1 - k/total_iters) + (T_end/T0)*(k/total_iters))
+        # Decide move type
+        if rng.random() < 0.6:
+            # Multi-center move
+            k_move = rng.integers(2, 5)
+            idxs = rng.choice(n, size=k_move, replace=False)
+            delta = rng.uniform(-0.02, 0.02, size=(k_move,2)) * (1 - k/total_iters)
+            cand = c.copy()
+            cand[idxs] += delta
+        else:
+            # Single-center move
+            i = rng.integers(n)
+            delta = rng.uniform(-0.02, 0.02, 2) * (1 - k/total_iters)
+            cand = c.copy()
+            cand[i] += delta
+        np.clip(cand, margin+0.001, 1 - margin - 0.001, out=cand)
+        rads = compute_max_radii(cand, margin)
+        s_new = np.sum(rads)
+        dE = s_new - np.sum(compute_max_radii(c, margin))
+        if dE > 0 or rng.random() < np.exp(dE / T):
+            c = cand
+        # Optional: periodically re-apply physics relaxation for local smoothing
+        if k % 300 == 0:
+            c = _physics_relaxation(c, margin, steps=20, rng=rng)
+    return c
+
+def _local_greedy_refinement(centers, margin, rng):
+    c = centers.copy()
+    n = c.shape[0]
+    for i in range(n):
+        best_pos = c[i].copy()
+        best_rad = compute_max_radii(c, margin)[i]
+        for delta_scale in [0.01, 0.005, 0.002]:
+            for dx, dy in [(delta_scale,0), (-delta_scale,0), (0,delta_scale), (0,-delta_scale)]:
+                trial = c.copy()
+                trial[i] = np.clip(c[i] + np.array([dx,dy]), margin+0.001, 1 - margin - 0.001)
+                rads = compute_max_radii(trial, margin)
+                if rads[i] > best_rad + 1e-8:
+                    best_rad = rads[i]
+                    best_pos = trial[i]
+        c[i] = best_pos
+    return c
+
+def compute_max_radii(centers, margin=0.0):
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0] - margin,
+        centers[:,1] - margin,
+        1 - centers[:,0] - margin,
+        1 - centers[:,1] - margin
+    ])
+    radii = np.clip(radii, 0, 1)
+    for _ in range(50):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d < 1e-8:
+                    if radii[i]>0 or radii[j]>0:
+                        radii[i]=radii[j]=0.0
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj + 1e-12)
+                        old_i, old_j = radii[i], radii[j]
+                        radii[i] *= scale
+                        radii[j] *= scale
+                        if abs(radii[i]-old_i)>1e-8 or abs(radii[j]-old_j)>1e-8:
+                            changed = True
+        if not changed:
+            break
+    return radii
+
+# --- Main run ---
+def run_packing():
+    centers, radii = construct_packing()
+    return centers, radii, np.sum(radii)
+# EVOLVE-BLOCK-END

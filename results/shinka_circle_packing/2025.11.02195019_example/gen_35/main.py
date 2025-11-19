@@ -1,0 +1,130 @@
+# EVOLVE-BLOCK-START
+"""Constructor-based circle packing for n=26 circles"""
+
+import numpy as np
+
+
+def construct_packing():
+    """
+    Construct a hybrid arrangement of 26 circles in a unit square,
+    using a hexagonal block, edge/corner, and inner placements.
+    Returns:
+        centers: np.array (26,2)
+        radii: np.array (26,)
+    """
+    n = 26
+    centers = np.zeros((n, 2))
+
+    # 1. Central hexagonal block (4x3 grid, offset rows)
+    hex_rows = 4
+    hex_cols = 3
+    dx = 0.17
+    dy = dx * np.sqrt(3) / 2
+    hex_block = []
+    base_x = 0.28
+    base_y = 0.28
+    for row in range(hex_rows):
+        y = base_y + row * dy
+        for col in range(hex_cols):
+            x = base_x + col * dx + (row % 2) * (dx / 2)
+            if 0.08 < x < 0.92 and 0.08 < y < 0.92:
+                hex_block.append((x, y))
+    # Use up to 10 centers in the hex block
+    hex_block = hex_block[:10]
+    core_n = len(hex_block)
+    centers[:core_n] = np.array(hex_block)
+
+    # 2. Place 8 on border midpoints and near corners
+    border_points = [
+        [0.13, 0.13], [0.87, 0.13], [0.13, 0.87], [0.87, 0.87],  # near corners
+        [0.5, 0.03], [0.5, 0.97],   # top/bottom edges
+        [0.03, 0.5], [0.97, 0.5],   # left/right edges
+    ]
+    centers[core_n:core_n+8] = np.array(border_points)
+
+    # 3. Place 4 at edge quarters
+    edge_points = [
+        [0.18, 0.5], [0.82, 0.5], [0.5, 0.18], [0.5, 0.82]
+    ]
+    centers[core_n+8:core_n+12] = np.array(edge_points)
+
+    # 4. Place 4 in the interior, slightly random within (0.35,0.65)
+    rng = np.random.default_rng(seed=99)
+    centers[core_n+12:core_n+16] = rng.uniform(
+        low=0.35, high=0.65, size=(4, 2)
+    )
+
+    # 5. Place last 6 in a loose inner ring (radius 0.28)
+    for i in range(6):
+        angle = 2 * np.pi * i / 6 + np.pi/18
+        centers[core_n+16+i] = [0.5 + 0.28 * np.cos(angle), 0.5 + 0.28 * np.sin(angle)]
+
+    # Clip to [0.01, 0.99]
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # Compute maximum valid radii for this configuration
+    radii = compute_max_radii(centers)
+    return centers, radii
+
+
+def compute_max_radii(centers):
+    """
+    Compute the maximum possible radii for each circle position
+    such that they don't overlap and stay within the unit square.
+
+    Args:
+        centers: np.array of shape (n, 2) with (x, y) coordinates
+
+    Returns:
+        np.array of shape (n) with radius of each circle
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+
+    # Initialize radii by border distance
+    for i in range(n):
+        x, y = centers[i]
+        radii[i] = min(x, y, 1 - x, 1 - y)
+
+    # Iteratively enforce pairwise and border constraints until convergence
+    max_iter = 200
+    tol = 1e-8
+    for _ in range(max_iter):
+        max_change = 0
+        # Enforce pairwise constraints
+        for i in range(n):
+            for j in range(i + 1, n):
+                dist = np.linalg.norm(centers[i] - centers[j])
+                if radii[i] + radii[j] > dist:
+                    excess = radii[i] + radii[j] - dist
+                    share = 0.5 * excess
+                    new_ri = max(radii[i] - share, 1e-8)
+                    new_rj = max(radii[j] - share, 1e-8)
+                    max_change = max(max_change,
+                                     abs(radii[i] - new_ri),
+                                     abs(radii[j] - new_rj))
+                    radii[i] = new_ri
+                    radii[j] = new_rj
+        # Enforce border constraints again (in case radii grew too large)
+        for i in range(n):
+            x, y = centers[i]
+            border_limit = min(x, y, 1 - x, 1 - y)
+            if radii[i] > border_limit:
+                max_change = max(max_change, radii[i] - border_limit)
+                radii[i] = border_limit
+        if max_change < tol:
+            break
+
+    return radii
+
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

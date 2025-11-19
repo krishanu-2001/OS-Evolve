@@ -1,0 +1,43 @@
+<NAME>
+multi_circle_annealing_moves
+</NAME>
+
+<DESCRIPTION>
+Introduce periodic multi-circle perturbations in the simulated annealing phase to escape deeper local minima. Every 100 iterations, randomly select 2–3 circles and jointly perturb them, instead of only single-circle moves, improving the chance to traverse difficult configuration changes.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    for k in range(2000):
+        i = np.random.randint(n)
+        old_pos = centers_sa[i].copy()
+        # decaying perturbation
+        delta = np.random.randn(2) * (0.005 * (1 - k / 2000))
+        centers_sa[i] = np.clip(centers_sa[i] + delta, 0.01, 0.99)
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = radii_tmp.sum()
+=======
+    for k in range(2000):
+        # Periodic multi-circle perturbation
+        if k % 100 == 0:
+            idxs = np.random.choice(n, np.random.randint(2, 4), replace=False)
+        else:
+            idxs = [np.random.randint(n)]
+        old_pos = centers_sa[idxs].copy()
+        # decaying perturbation
+        delta = np.random.randn(len(idxs), 2) * (0.005 * (1 - k / 2000))
+        centers_sa[idxs] = np.clip(centers_sa[idxs] + delta, 0.01, 0.99)
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = radii_tmp.sum()
+>>>>>>> REPLACE
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+        else:
+            centers_sa[i] = old_pos
+=======
+        else:
+            centers_sa[idxs] = old_pos
+>>>>>>> REPLACE
+</DIFF>

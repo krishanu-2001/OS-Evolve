@@ -1,0 +1,119 @@
+<simulated_annealing_step_scale_decay_fix>
+Fix indentation and exact matching of the simulated annealing step_scale decay insertion to match the existing code indentation and style.
+</simulated_annealing_step_scale_decay_fix>
+
+<DIFF>
+<<<<<<< SEARCH
+    step_scale = 0.02
+
+    for it in range(iters):
+        if rnd.rand() < multi_prob:
+            # multi-center perturbation
+            idxs = rnd.choice(n, multi_count, replace=False)
+            old_ps = curr_centers[idxs].copy()
+            old_rs = curr_radii[idxs].copy()
+            # propose new positions
+            steps = rnd.randn(multi_count, 2) * step_scale
+            curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
+            # recompute radii for moved circles
+            new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
+            if (new_rs > 1e-8).all():
+                new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[idxs] = new_rs
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                else:
+                    curr_centers[idxs] = old_ps
+            else:
+                curr_centers[idxs] = old_ps
+        else:
+            # single-center perturbation
+            i = rnd.randint(n)
+            old_p = curr_centers[i].copy()
+            old_r = curr_radii[i]
+            step = rnd.randn(2) * step_scale
+            new_p = np.clip(old_p + step, 0.0, 1.0)
+            curr_centers[i] = new_p
+            new_r = compute_radius_at(i, curr_centers, curr_radii)
+            if new_r <= 1e-8:
+                curr_centers[i] = old_p
+            else:
+                new_sum = curr_sum - old_r + new_r
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[i] = new_r
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                else:
+                    curr_centers[i] = old_p
+        # cool down
+        T *= decay
+
+    return best_centers, best_radii
+=======
+    step_scale = 0.02
+
+    for it in range(iters):
+        step_scale *= 0.9998
+        if rnd.rand() < multi_prob:
+            # multi-center perturbation
+            idxs = rnd.choice(n, multi_count, replace=False)
+            old_ps = curr_centers[idxs].copy()
+            old_rs = curr_radii[idxs].copy()
+            # propose new positions
+            steps = rnd.randn(multi_count, 2) * step_scale
+            curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
+            # recompute radii for moved circles
+            new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
+            if (new_rs > 1e-8).all():
+                new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[idxs] = new_rs
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                else:
+                    curr_centers[idxs] = old_ps
+            else:
+                curr_centers[idxs] = old_ps
+        else:
+            # single-center perturbation
+            i = rnd.randint(n)
+            old_p = curr_centers[i].copy()
+            old_r = curr_radii[i]
+            step = rnd.randn(2) * step_scale
+            new_p = np.clip(old_p + step, 0.0, 1.0)
+            curr_centers[i] = new_p
+            new_r = compute_radius_at(i, curr_centers, curr_radii)
+            if new_r <= 1e-8:
+                curr_centers[i] = old_p
+            else:
+                new_sum = curr_sum - old_r + new_r
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[i] = new_r
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                else:
+                    curr_centers[i] = old_p
+        # cool down
+        T *= decay
+
+    return best_centers, best_radii
+>>>>>>> REPLACE
+
+</DIFF>

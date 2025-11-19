@@ -1,0 +1,45 @@
+<NAME>
+iterative_constraint_enforcement
+</NAME>
+
+<DESCRIPTION>
+Replace the single-pass pairwise radius scaling with an iterative constraint enforcement loop that continues until changes fall below a small tolerance. This ensures that radii are maximized under all pairwise distance constraints, potentially increasing the total sum of radii by more tightly packing circles.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # Then, limit by distance to other circles
+    # Each pair of circles with centers at distance d can have
+    # sum of radii at most d to avoid overlap
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+
+            # If current radii would cause overlap
+            if radii[i] + radii[j] > dist:
+                # Scale both radii proportionally
+                scale = dist / (radii[i] + radii[j])
+                radii[i] *= scale
+                radii[j] *= scale
+=======
+    # Then, iteratively enforce distance constraints until convergence
+    max_iter = 100
+    tol = 1e-6
+    for _ in range(max_iter):
+        max_change = 0
+        for i in range(n):
+            for j in range(i + 1, n):
+                dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+                if radii[i] + radii[j] > dist:
+                    scale = dist / (radii[i] + radii[j])
+                    new_ri = radii[i] * scale
+                    new_rj = radii[j] * scale
+                    max_change = max(max_change,
+                                     abs(radii[i] - new_ri),
+                                     abs(radii[j] - new_rj))
+                    radii[i] = new_ri
+                    radii[j] = new_rj
+        if max_change < tol:
+            break
+>>>>>>> REPLACE
+</DIFF>

@@ -1,0 +1,15 @@
+{
+    "combined_score": 2.0015224454759615,
+    "public": {
+        "centers_str": "  centers[0] = (0.4252, 0.9346)\n  centers[1] = (0.3502, 0.8475)\n  centers[2] = (0.8726, 0.7129)\n  centers[3] = (0.4629, 0.7587)\n  centers[4] = (0.3169, 0.6435)\n  centers[5] = (0.7589, 0.1328)\n  centers[6] = (0.1813, 0.3136)\n  centers[7] = (0.5189, 0.2196)\n  centers[8] = (0.6617, 0.2843)\n  centers[9] = (0.6153, 0.5574)\n  centers[10] = (0.3130, 0.4309)\n  centers[11] = (0.2640, 0.5565)\n  centers[12] = (0.4530, 0.3663)\n  centers[13] = (0.1270, 0.4633)\n  centers[14] = (0.6175, 0.1070)\n  centers[15] = (0.8766, 0.5092)\n  centers[16] = (0.8587, 0.2859)\n  centers[17] = (0.1496, 0.1050)\n  centers[18] = (0.8988, 0.0950)\n  centers[19] = (0.1432, 0.8604)\n  centers[20] = (0.8892, 0.8952)\n  centers[21] = (0.6685, 0.8447)\n  centers[22] = (0.3159, 0.2047)\n  centers[23] = (0.1369, 0.6507)\n  centers[24] = (0.4631, 0.0883)\n  centers[25] = (0.0918, 0.2425)",
+        "num_circles": 26
+    },
+    "private": {
+        "reported_sum_of_radii": 2.0015224454759615
+    },
+    "execution_time_mean": 4.982142156979535,
+    "execution_time_std": 0.0,
+    "num_valid_runs": 1,
+    "num_invalid_runs": 0,
+    "all_validation_errors": []
+}

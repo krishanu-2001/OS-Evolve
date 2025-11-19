@@ -1,0 +1,17 @@
+{
+    "combined_score": NaN,
+    "public": {
+        "centers_str": "  centers[0] = (0.1500, 0.1500)\n  centers[1] = (0.1500, 0.8500)\n  centers[2] = (0.8500, 0.1500)\n  centers[3] = (0.8500, 0.8500)\n  centers[4] = (0.2500, 0.1500)\n  centers[5] = (0.4000, 0.1500)\n  centers[6] = (0.5500, 0.1500)\n  centers[7] = (0.7000, 0.1500)\n  centers[8] = (0.2500, 0.8500)\n  centers[9] = (0.4000, 0.8500)\n  centers[10] = (0.5500, 0.8500)\n  centers[11] = (0.7000, 0.8500)\n  centers[12] = (0.3200, 0.3200)\n  centers[13] = (0.5000, 0.3200)\n  centers[14] = (0.6800, 0.3200)\n  centers[15] = (0.3200, 0.5000)\n  centers[16] = (nan, nan)\n  centers[17] = (0.6800, 0.5000)\n  centers[18] = (0.3200, 0.6800)\n  centers[19] = (0.5000, 0.6800)\n  centers[20] = (0.6800, 0.6800)\n  centers[21] = (0.5000, 0.1500)\n  centers[22] = (0.5000, 0.8500)\n  centers[23] = (0.1500, 0.5000)\n  centers[24] = (0.8500, 0.5000)\n  centers[25] = (nan, nan)",
+        "num_circles": 26
+    },
+    "private": {
+        "reported_sum_of_radii": NaN
+    },
+    "execution_time_mean": 0.18609443499008194,
+    "execution_time_std": 0.0,
+    "num_valid_runs": 0,
+    "num_invalid_runs": 1,
+    "all_validation_errors": [
+        "Sum of radii (nan) does not match reported (nan)"
+    ]
+}

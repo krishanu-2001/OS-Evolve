@@ -1,0 +1,332 @@
+# EVOLVE-BLOCK-START
+"""
+Circle packing optimizer for n=26 with:
+- Localized gap-filling greedy initialization
+- Custom radial, ring, and hex layouts
+- Simulated annealing refinement with multi-move steps
+- Deterministic local greedy repack sweep after annealing
+"""
+import numpy as np
+from typing import Tuple, List, Callable
+
+class LocalizedPacking26:
+    def __init__(
+        self,
+        n: int = 26,
+        greedy_attempts: int = 120,
+        greedy_local_pts: int = 60,
+        gap_fill_pts: int = 30,
+        margin: float = 0.02,
+        max_sweeps: int = 40,
+        tol: float = 1e-7,
+        anneal_iters: int = 1700,
+        T0: float = 0.012,
+        alpha: float = 0.996,
+        sigma_base: float = 0.013,
+        sigma_multi: float = 0.027,
+        stagnation_limit: int = 150,
+        force_iters: int = 65,
+        force_lr: float = 0.012,
+        repack_passes: int = 2,
+        repack_local_pts: int = 50,
+        repack_radius: float = 0.15,
+    ):
+        self.n = n
+        self.greedy_attempts = greedy_attempts
+        self.greedy_local_pts = greedy_local_pts
+        self.gap_fill_pts = gap_fill_pts
+        self.margin = margin
+        self.max_sweeps = max_sweeps
+        self.tol = tol
+        self.anneal_iters = anneal_iters
+        self.T0 = T0
+        self.alpha = alpha
+        self.sigma_base = sigma_base
+        self.sigma_multi = sigma_multi
+        self.stagnation_limit = stagnation_limit
+        self.force_iters = force_iters
+        self.force_lr = force_lr
+        self.repack_passes = repack_passes
+        self.repack_local_pts = repack_local_pts
+        self.repack_radius = repack_radius
+
+        # Initial layouts
+        self.layout_methods: List[Callable[[], np.ndarray]] = [
+            self._hex_layout([6,5,6,5,4]),
+            self._radial_layout,
+            self._hex_layout([5,6,5,6,4]),
+            self._ring_layout
+        ]
+
+    def optimize(self) -> Tuple[np.ndarray, np.ndarray]:
+        best_score = -np.inf
+        best_c = None
+        best_r = None
+        # Try each greedy layout
+        for layout_func in self.layout_methods:
+            c0 = self.localized_greedy_init(layout_func())
+            r0 = self._compute_radii(c0)
+            c1, r1 = self._anneal(c0, r0)
+            c2, r2 = self._local_repack(c1, r1)
+            # physics repulsion polish
+            c3, r3 = self._force_refine(c2)
+            s = np.sum(r3)
+            if s > best_score:
+                best_score = s
+                best_c = c3.copy()
+                best_r = r3.copy()
+        return best_c, best_r
+
+    def localized_greedy_init(self, layout: np.ndarray) -> np.ndarray:
+        """
+        Place circles greedily, after each placement sample locally around other existing circles to fill any discovered local gaps.
+        """
+        centers = []
+        used = 0
+        # Seed with 2-3 largest "anchor" points if possible
+        anchor_order = np.argsort(-np.linalg.norm(layout-0.5, axis=1))
+        anchor_indices = [anchor_order[0], anchor_order[-1], np.argmax(layout[:,1])]
+        candidate_indices = [i for i in range(self.n) if i not in anchor_indices]
+        # Always try to anchor 2-3 "boundary" seed points for most stability
+        for i in anchor_indices:
+            centers.append(layout[i])
+            used += 1
+        # Greedy placement:
+        while used < self.n:
+            best_r = -1
+            best_p = None
+            best_j = -1
+            # Global candidates: first try unused layout points
+            for j in candidate_indices:
+                p = layout[j]
+                min_dist = min([np.linalg.norm(p-c) for c in centers]) if centers else 1
+                rad = min(
+                    p[0]-self.margin, p[1]-self.margin,
+                    1-self.margin-p[0], 1-self.margin-p[1],
+                    min_dist/2
+                )
+                if rad > best_r:
+                    best_r = rad
+                    best_p = p
+                    best_j = j
+            # Also sample random in square to opportunistically improve
+            for _ in range(self.greedy_attempts):
+                p = np.random.uniform(self.margin,1-self.margin,2)
+                min_dist = min([np.linalg.norm(p-c) for c in centers]) if centers else 1
+                rad = min(
+                    p[0]-self.margin, p[1]-self.margin,
+                    1-self.margin-p[0], 1-self.margin-p[1],
+                    min_dist/2
+                )
+                if rad > best_r:
+                    best_r = rad
+                    best_p = p
+                    best_j = -1
+            centers.append(best_p)
+            if best_j in candidate_indices:
+                candidate_indices.remove(best_j)
+            used += 1
+            # --- Localized gap-fill search: try to insert at boundary between each pair (where there might be gaps) ---
+            if used >= 3 and used < self.n:
+                for (i_a, c_a) in enumerate(centers[:-1]):
+                    for (i_b, c_b) in enumerate(centers[:-1]):
+                        if i_b <= i_a: continue
+                        mid = 0.5*(c_a + c_b)
+                        for _ in range(self.gap_fill_pts):
+                            delta = (np.random.randn(2))*0.18
+                            probe = np.clip(mid+delta, self.margin, 1-self.margin)
+                            # Check minimal distance
+                            dists = [np.linalg.norm(probe-c) for c in centers]
+                            min_dist = min(dists)
+                            rad = min(
+                                probe[0]-self.margin, probe[1]-self.margin,
+                                1-self.margin-probe[0], 1-self.margin-probe[1],
+                                min_dist/2)
+                            if rad > best_r:
+                                best_r = rad
+                                best_p = probe
+                                best_j = -1
+                # If a better local gap found, use it
+                if best_p is not None and np.linalg.norm(best_p - centers[-1]) > 3e-3:
+                    centers[-1] = best_p
+        return np.array(centers)[:self.n]
+
+    def _compute_radii(self, centers: np.ndarray) -> np.ndarray:
+        radii = np.minimum.reduce([
+            centers[:,0]-self.margin,
+            centers[:,1]-self.margin,
+            1-self.margin-centers[:,0],
+            1-self.margin-centers[:,1],
+        ]).copy()
+        for _ in range(self.max_sweeps):
+            diff = centers[:,None,:] - centers[None,:,:]
+            D = np.linalg.norm(diff,axis=2) + np.eye(self.n)
+            sumr = radii[:,None] + radii[None,:]
+            scale = np.minimum(1.0, D / sumr)
+            min_scale = scale.min(axis=1)
+            new_r = radii * min_scale
+            if np.max(np.abs(new_r - radii)) < self.tol:
+                break
+            radii = new_r
+        return radii
+
+    def _anneal(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        curr_c, curr_r = centers.copy(), radii.copy()
+        curr_score = curr_r.sum()
+        best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+        T = self.T0
+        stagn = 0
+        for _ in range(self.anneal_iters):
+            if stagn > self.stagnation_limit:
+                sigma, p_multi = self.sigma_multi, 0.55
+            else:
+                sigma, p_multi = self.sigma_base, 0.22
+            # Choose move type
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx),2) * sigma
+            c_new = np.clip(c_new, self.margin, 1.0-self.margin)
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE/T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if score_new > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagn = 0
+                else:
+                    stagn += 1
+            else:
+                stagn += 1
+            T *= self.alpha
+            if T < 2e-6: break
+        return best_c, best_r
+
+    def _local_repack(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        # After annealing, greedily reposition each circle (hold all others fixed), sampling locally
+        c = centers.copy()
+        for _ in range(self.repack_passes):
+            for i in range(self.n):
+                others = np.delete(c, i, axis=0)
+                best_p = c[i]
+                best_r = 0.0
+                # Local probes
+                loc_probes = c[i] + (np.random.randn(self.repack_local_pts,2))*self.repack_radius
+                probes = np.vstack([loc_probes, c[i]])
+                probes = np.clip(probes, self.margin, 1.0-self.margin)
+                for p in probes:
+                    border_r = min(p[0]-self.margin,p[1]-self.margin,1-self.margin-p[0],1-self.margin-p[1])
+                    dmin = np.min(np.linalg.norm(others - p, axis=1))
+                    candid_r = min(border_r, dmin/2)
+                    if candid_r > best_r:
+                        best_r = candid_r
+                        best_p = p
+                c[i] = best_p
+        r = self._compute_radii(c)
+        return c, r
+
+    def _force_refine(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = self._compute_radii(c)
+            diff = c[:,None,:] - c[None,:,:]
+            dist = np.linalg.norm(diff,axis=2) + np.eye(self.n)
+            sumr = r[:,None] + r[None,:]
+            overlap = sumr - dist
+            mask = overlap>0
+            dirs = np.zeros_like(diff)
+            nz = dist>0
+            dirs[nz] = diff[nz]/dist[nz][...,None]
+            f = overlap[...,None]*dirs
+            forces = -np.sum(np.where(mask[...,None],f,0),axis=1) \
+                     +np.sum(np.where(mask[...,None],f,0),axis=0)
+            # border repulsion
+            left  = np.maximum(r - (c[:,0]-self.margin), 0)
+            right = np.maximum(r - (1-self.margin-c[:,0]), 0)
+            down  = np.maximum(r - (c[:,1]-self.margin), 0)
+            up    = np.maximum(r - (1-self.margin-c[:,1]), 0)
+            forces[:,0] += left - right
+            forces[:,1] += down - up
+            c += self.force_lr * forces
+            c = np.clip(c, self.margin,1.0-self.margin)
+        return c, self._compute_radii(c)
+
+    # Layout initializers (produce length-n array)
+
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = self.margin
+            maxr = max(rows)
+            dx = (1-2*margin)/(maxr-1) if maxr>1 else 1-2*margin
+            dy = dx*np.sqrt(3)/2
+            y0 = margin
+            pts = []
+            for i,cnt in enumerate(rows):
+                y = y0 + i*dy
+                w = dx*(cnt-1) if cnt>1 else 0
+                x0 = margin + (maxr*dx - w)/2 - margin
+                for j in range(cnt):
+                    pts.append((x0 + j*dx, y))
+            arr = np.array(pts)
+            if len(arr) > self.n:
+                return arr[:self.n]
+            if len(arr) < self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr,pad])
+            return arr
+        return layout
+
+    def _radial_layout(self) -> np.ndarray:
+        c = np.zeros((self.n,2))
+        c[0] = [0.5,0.5]
+        for i in range(7):
+            θ = 2*np.pi*i/7 + np.pi/20
+            c[i+1] = [0.5+0.295*np.cos(θ), 0.5+0.295*np.sin(θ)]
+        for i in range(12):
+            θ = 2*np.pi*i/12 + np.pi/12
+            c[i+8] = [0.5+0.62*np.cos(θ), 0.5+0.62*np.sin(θ)]
+        corners = [(self.margin,self.margin),(1-self.margin,self.margin),
+                   (self.margin,1-self.margin),(1-self.margin,1-self.margin),
+                   (0.3,0.84)]
+        for k,p in enumerate(corners, start=20):
+            c[k] = p
+        # The last unfilled
+        left = np.array([[0.85,0.33]])
+        c[25:] = left
+        return c
+
+    def _ring_layout(self) -> np.ndarray:
+        c = np.zeros((self.n,2))
+        c[0] = [0.5,0.5]
+        for i in range(7):
+            θ = 2*np.pi*i/7
+            c[i+1] = [0.5+0.31*np.cos(θ), 0.5+0.31*np.sin(θ)]
+        for i in range(12):
+            θ = 2*np.pi*i/12
+            c[i+8] = [0.5+0.6*np.cos(θ), 0.5+0.6*np.sin(θ)]
+        # Edges and one off-corner
+        c[20] = [self.margin,0.45]
+        c[21] = [1-self.margin,0.56]
+        c[22] = [0.45,1-self.margin]
+        c[23] = [0.23,0.17]
+        c[24] = [0.84,0.18]
+        c[25] = [0.13,0.82]
+        return c
+
+def construct_packing() -> Tuple[np.ndarray, np.ndarray]:
+    """Compute optimized packing of 26 circles in a unit square."""
+    packer = LocalizedPacking26()
+    return packer.optimize()
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

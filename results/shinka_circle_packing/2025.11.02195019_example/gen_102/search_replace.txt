@@ -1,0 +1,85 @@
+<NAME>
+adaptive_cooling_and_local_refinement
+</NAME>
+<DESCRIPTION>
+Implement an adaptive cooling schedule during the annealing phase, which adjusts the temperature based on recent progress (number of consecutive non-improvements). Additionally, add a local greedy repacking step after annealing, where each circle is greedily repositioned with small candidate perturbations to fine-tune radii and placements. This approach can help the algorithm escape shallow local minima and further increase the total sum of radii, leveraging both global stochastic exploration and local deterministic refinement.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+def _anneal_stage(centers, iters, margin, layouts, rng):
+    n = centers.shape[0]
+    c = centers.copy()
+    r = compute_max_radii(c, margin)
+    e = r.sum()
+    dx = (1 - 2*margin) / max(map(len, layouts))
+    T0, T1 = 1.1e-2, 2.2e-4
+    for k in range(iters):
+        T = T0 * ((1-k/iters) + (T1/T0)*(k/iters))
+        i = int(rng.integers(n))
+        cand = c.copy()
+        step = dx * (0.69 + 0.36*np.sin(k/41.9))  # small periodic vib
+        delta = rng.uniform(-step, step, 2) * (1 - k/iters)
+        cand[i] += delta
+        np.clip(cand, margin, 1-margin, out=cand)
+        cand_r = compute_max_radii(cand, margin)
+        cand_e = cand_r.sum()
+        dE = cand_e - e
+        if dE > 0 or rng.random() < np.exp(dE / (T+1e-16)):
+            c, r, e = cand, cand_r, cand_e
+    return c
+=======
+def _anneal_stage(centers, iters, margin, layouts, rng):
+    n = centers.shape[0]
+    c = centers.copy()
+    r = compute_max_radii(c, margin)
+    e = r.sum()
+    dx = (1 - 2*margin) / max(map(len, layouts))
+    T0, T1 = 1.1e-2, 2.2e-4
+    stagnation_counter = 0
+    last_score = e
+    for k in range(iters):
+        # Adaptive temperature based on recent progress
+        progress = e - last_score
+        if progress < 1e-4:
+            # No significant progress, increase temperature
+            T = T0 * (1 + 0.5 * (k / iters))
+            stagnation_counter += 1
+        else:
+            # Good progress, decrease temperature
+            T = T0 * (1 - k / iters)
+            stagnation_counter = 0
+        if stagnation_counter > 50:
+            T *= 1.2  # slightly increase to escape local minima
+        last_score = e
+
+        i = int(rng.integers(n))
+        cand = c.copy()
+        step = dx * (0.69 + 0.36*np.sin(k/41.9))
+        delta = rng.uniform(-step, step, 2) * (1 - k/iters)
+        cand[i] += delta
+        np.clip(cand, margin, 1-margin, out=cand)
+        cand_r = compute_max_radii(cand, margin)
+        cand_e = cand_r.sum()
+        dE = cand_e - e
+        if dE > 0 or rng.random() < np.exp(dE / max(T, 1e-12)):
+            c, r, e = cand, cand_r, cand_e
+    # Final local greedy repacking for fine-tuning
+    for i in range(n):
+        best_r = r[i]
+        best_p = c[i].copy()
+        for _ in range(10):
+            delta = rng.uniform(-dx, dx, 2) * 0.5
+            cand_pos = np.clip(best_p + delta, margin, 1 - margin)
+            # Compute radius at candidate position
+            temp_centers = c.copy()
+            temp_centers[i] = cand_pos
+            cand_radii = compute_max_radii(temp_centers, margin)
+            r_candidate = cand_radii[i]
+            if r_candidate > best_r:
+                best_r = r_candidate
+                best_p = cand_pos
+                c[i] = best_p
+                r[i] = best_r
+    return c
+>>>>>>> REPLACE
+</DIFF>

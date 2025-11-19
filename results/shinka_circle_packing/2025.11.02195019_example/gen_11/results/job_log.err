@@ -1,0 +1,4 @@
+/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_11/main.py:87: RuntimeWarning: invalid value encountered in divide
+  direction[overlap_mask] = diff[overlap_mask] / dist[overlap_mask][:, None]
+/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_11/main.py:89: RuntimeWarning: divide by zero encountered in divide
+  force_magnitudes[overlap_mask] = overlap[overlap_mask] / dist[overlap_mask]

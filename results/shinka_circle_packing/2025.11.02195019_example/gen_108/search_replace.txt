@@ -1,0 +1,90 @@
+<NAME>
+adaptive_cooling_schedule
+</NAME>
+
+<DESCRIPTION>
+The current program uses a fixed exponential cooling schedule during the simulated annealing phase, which may not adapt well to the local landscape of the solution space. Introducing an adaptive cooling schedule that adjusts the temperature decay rate based on recent improvement trends can help the algorithm escape local minima more effectively and converge to higher-quality packings. Specifically, if the solution improves frequently, slow down cooling to explore more; if stagnation occurs, accelerate cooling to focus on exploitation. This dynamic adjustment can lead to better final packings and higher total radii sum.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        T = self.T0
+        stagnation = 0
+        no_improve_count = 0
+        adapt_cool_factor = 1.0
+
+        for it in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                    no_improve_count = 0
+                    adapt_cool_factor = max(0.5, adapt_cool_factor * 0.95)  # slow cooling on improvement
+                else:
+                    stagnation += 1
+                    no_improve_count += 1
+                    if no_improve_count > 20:
+                        adapt_cool_factor = min(2.0, adapt_cool_factor * 1.1)  # speed cooling on stagnation
+                        no_improve_count = 0
+            else:
+                stagnation += 1
+                no_improve_count += 1
+                if no_improve_count > 20:
+                    adapt_cool_factor = min(2.0, adapt_cool_factor * 1.1)
+                    no_improve_count = 0
+            T *= self.alpha
+=======
+        T = self.T0
+        stagnation = 0
+        no_improve_count = 0
+        cool_factor = 1.0  # dynamic cooling factor
+
+        for it in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+
+            # Adjust cooling rate based on recent improvement
+            if curr_score > best_score - 1e-4:
+                # frequent improvements, slow cooling
+                cool_factor = max(0.5, cool_factor * 0.98)
+            else:
+                # stagnation, accelerate cooling
+                cool_factor = min(2.0, cool_factor * 1.02)
+
+            T = self.T0 * (self.alpha ** cool_factor)
+>>>>>>> REPLACE
+</DIFF>

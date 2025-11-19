@@ -1,0 +1,83 @@
+<NAME>
+adaptive_greedy_sampling_density
+</NAME>
+
+<DESCRIPTION>
+Increase the number of local and global samples in the greedy repacking stage and make the number of samples adaptive: more samples for circles with smaller radii (i.e., those in crowded regions), and fewer for larger circles. This increases the chance of finding better positions for the most constrained circles, which are often the limiting factor in the sum of radii. This is inspired by the insight that edge/corner circles and those in tight clusters benefit from more intensive local search, while large, unconstrained circles do not need as much sampling. This change is low-overhead and can yield a denser packing, especially in the final stages.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _greedy_repack_stage(c, samples=150):
+        n = c.shape[0]
+        for i in range(n):
+            # current radii and other circles
+            radii_all = compute_max_radii(c)
+            others = np.delete(c, i, axis=0)
+            other_rs = np.delete(radii_all, i)
+            best_p = c[i].copy()
+            best_r = radii_all[i]
+            # generate candidate points: local jitter and some global samples
+            local_pts = best_p + np.random.randn(samples, 2) * (best_r * 0.4 + 1e-6)
+            global_pts = np.random.rand(samples, 2) * 0.98 + 0.01
+            pts = np.vstack((local_pts, global_pts))
+            pts = np.clip(pts, 0.01, 0.99)
+            for p in pts:
+                # wall constraint
+                r_new = min(p[0], 1-p[0], p[1], 1-p[1])
+                # overlap constraint
+                if others.size > 0:
+                    d = np.linalg.norm(others - p, axis=1) - other_rs
+                    r_new = min(r_new, d.min())
+                if r_new > best_r:
+                    best_r = r_new
+                    best_p = p
+            c[i] = best_p
+        return c
+    centers = _greedy_repack_stage(centers)
+    radii = compute_max_radii(centers)
+    return centers, radii
+=======
+    def _greedy_repack_stage(c, samples=150):
+        n = c.shape[0]
+        for i in range(n):
+            # current radii and other circles
+            radii_all = compute_max_radii(c)
+            others = np.delete(c, i, axis=0)
+            other_rs = np.delete(radii_all, i)
+            best_p = c[i].copy()
+            best_r = radii_all[i]
+            # Adaptive sampling: more samples for smaller circles
+            # (smaller radii = more crowded, need more search)
+            min_r, max_r = radii_all.min(), radii_all.max()
+            # Map radius to [0,1], invert so small radii get more samples
+            if max_r > min_r:
+                rel = (best_r - min_r) / (max_r - min_r)
+            else:
+                rel = 0.5
+            # At least 200, up to 800 samples
+            n_local = int(200 + 600 * (1 - rel))
+            n_global = int(100 + 300 * (1 - rel))
+            # generate candidate points: local jitter and some global samples
+            local_pts = best_p + np.random.randn(n_local, 2) * (best_r * 0.4 + 1e-6)
+            global_pts = np.random.rand(n_global, 2) * 0.98 + 0.01
+            pts = np.vstack((local_pts, global_pts))
+            pts = np.clip(pts, 0.01, 0.99)
+            for p in pts:
+                # wall constraint
+                r_new = min(p[0], 1-p[0], p[1], 1-p[1])
+                # overlap constraint
+                if others.size > 0:
+                    d = np.linalg.norm(others - p, axis=1) - other_rs
+                    r_new = min(r_new, d.min())
+                if r_new > best_r:
+                    best_r = r_new
+                    best_p = p
+            c[i] = best_p
+        return c
+    centers = _greedy_repack_stage(centers)
+    radii = compute_max_radii(centers)
+    return centers, radii
+>>>>>>> REPLACE
+
+</DIFF>

@@ -1,0 +1,597 @@
+ShinkaEvolve: Detailed Code Flow Documentation
+
+This document provides an extremely detailed explanation of how ShinkaEvolve works, tracing the execution flow from the command line to program evolution.
+
+Table of Contents
+1. Entry Point
+2. Initialization Phase
+3. Generation 0: Initial Program
+4. Main Evolution Loop
+5. Job Submission Flow
+6. Patch Generation Flow
+7. Job Execution Flow
+8. Job Completion Flow
+9. Database Operations
+10. LLM Query Flow
+
+Entry Point
+
+Command: shinka_launch variant=circle_packing_example
+
+File: shinka/launch_hydra.py
+
+1. Hydra Configuration Loading (Line 9)
+   - @hydra.main decorator initializes Hydra framework
+   - Loads configuration from configs/config.yaml
+   - Resolves configuration hierarchy:
+     - Base config: configs/config.yaml
+     - Variant: configs/variant/circle_packing_example.yaml
+     - Task: configs/task/circle_packing.yaml
+     - Evolution: configs/evolution/large_budget.yaml
+     - Database: configs/database/island_large.yaml
+     - Cluster: configs/cluster/local.yaml
+
+2. Environment Setup (Lines 11-13)
+   - Checks for .env file in current directory
+   - Loads environment variables (API keys, etc.) using dotenv
+
+3. Configuration Instantiation (Lines 18-20)
+   - hydra.utils.instantiate() creates Python objects from YAML configs:
+     - job_cfg: JobConfig object (e.g., LocalJobConfig)
+     - db_cfg: DatabaseConfig object
+     - evo_cfg: EvolutionConfig object
+
+4. EvolutionRunner Creation (Lines 22-27)
+   - Creates EvolutionRunner instance with all configs
+   - Passes verbose flag for logging
+
+5. Start Evolution (Line 28)
+   - Calls evo_runner.run() to begin evolution
+
+Initialization Phase
+
+File: shinka/core/runner.py - EvolutionRunner.__init__()
+
+Step 1: Directory Setup (Lines 104-108)
+- Creates results directory: results/{exp_name}/{run_name}{variant_suffix}
+- Example: results/shinka_circle_packing/2025.11.12123456_example
+
+Step 2: Logging Configuration (Lines 110-136)
+- Sets up dual logging:
+  - Console: RichHandler for formatted terminal output
+  - File: FileHandler for detailed logs in evolution_run.log
+- Logs start time, results directory, configuration
+
+Step 3: Resume Detection (Lines 138-142)
+- Checks if database file exists at {results_dir}/{db_config.db_path}
+- If exists: marks as resuming run
+- If not: starts fresh run
+
+Step 4: LLM Selection Strategy (Lines 144-157)
+- If llm_dynamic_selection is set:
+  - Creates AsymmetricUCB bandit algorithm for model selection
+  - Tracks model performance and selects best models dynamically
+- If None: Uses uniform random selection
+
+Step 5: Database Initialization (Lines 159-166)
+- Creates ProgramDatabase instance:
+  - Opens/creates SQLite database at {results_dir}/{db_path}
+  - Initializes schema (programs table, indices)
+  - Creates EmbeddingClient for code embeddings
+  - Sets up IslandManager for multi-island evolution
+
+Step 6: Job Scheduler Initialization (Lines 167-171)
+- Creates JobScheduler:
+  - For job_type="local": Uses local process execution
+  - For job_type="slurm_conda": Uses SLURM cluster submission
+  - Sets up thread pool executor for parallel job monitoring
+
+Step 7: LLM Clients Initialization (Lines 173-203)
+- Main LLM Client (self.llm):
+  - LLMClient with models from evo_config.llm_models
+  - Handles code generation and patching
+- Embedding Client (self.embedding):
+  - EmbeddingClient for code embeddings (if configured)
+- Meta LLM Client (self.meta_llm):
+  - Optional LLMClient for meta-recommendations
+- Novelty LLM Client (self.novelty_llm):
+  - Optional LLMClient for novelty assessment
+
+Step 8: Helper Components (Lines 205-228)
+- PromptSampler: Generates prompts for LLM queries
+- MetaSummarizer: Manages meta-recommendations and summaries
+- NoveltyJudge: Assesses code novelty using embeddings
+
+Step 9: Resume State Restoration (Lines 250-264)
+- If resuming:
+  - Sets completed_generations from database
+  - Restores meta memory state from meta_memory.json
+  - Updates best solution tracking
+
+Step 10: Configuration Save (Lines 268-292)
+- Saves all configurations to experiment_config.yaml
+- Includes evolution, job, and database configs
+
+Generation 0: Initial Program
+
+File: shinka/core/runner.py - _run_generation_0()
+
+Step 1: Directory Creation (Lines 458-462)
+- Creates gen_0/ directory
+- Creates gen_0/main.{lang_ext} file path
+- Creates gen_0/results/ directory for evaluation outputs
+
+Step 2: Initial Program Source (Lines 469-488)
+Option A: From File (Lines 469-474)
+- If init_program_path is set:
+  - Copies file to gen_0/main.{lang_ext}
+  - Sets patch_name = "initial_program"
+  - Sets patch_description = "Initial program from file."
+
+Option B: LLM Generation (Lines 476-488)
+- Calls generate_initial_program():
+  - Gets prompt from PromptSampler.initial_program_prompt()
+  - Queries LLM with initial program prompt
+  - Extracts code between ```{language} and ``` tags
+  - Retries up to max_patch_attempts times if extraction fails
+  - Wraps code with EVOLVE-BLOCK-START/END markers
+  - Saves to gen_0/main.{lang_ext}
+
+Step 3: Program Execution (Line 491)
+- Calls scheduler.run(exec_fname, results_dir):
+  - For local jobs: Runs python evaluate.py --program_path {exec_fname} --results_dir {results_dir}
+  - For SLURM jobs: Submits SLURM job and waits for completion
+  - Returns (results_dict, runtime)
+
+Step 4: Code Embedding (Line 493)
+- Calls get_code_embedding(exec_fname):
+  - Reads code from file
+  - Redacts immutable parts (constants, imports)
+  - Calls EmbeddingClient.get_embedding():
+    - For OpenAI: Uses text-embedding-3-small
+    - Returns embedding vector and cost
+  - Returns (embedding_list, cost)
+
+Step 5: Results Processing (Lines 496-515)
+- Extracts from results dict:
+  - correct: Boolean indicating functional correctness
+  - metrics: Dictionary with:
+    - combined_score: Single numeric score
+    - public: Public metrics (visible to LLM)
+    - private: Private metrics (not visible to LLM)
+    - text_feedback: Textual feedback string
+  - stdout_log, stderr_log: Execution logs
+
+Step 6: Database Insertion (Lines 518-551)
+- Creates Program object:
+  - id: UUID
+  - code: Full code string
+  - generation: 0
+  - parent_id: None
+  - embedding: Code embedding vector
+  - combined_score, correct, metrics, etc.
+- Calls db.add(program):
+  - Inserts into SQLite programs table
+  - Updates archive if score qualifies
+  - Assigns to island (if multi-island)
+- Updates LLM selection baseline score
+- Saves database
+
+Step 7: Meta Memory Update (Lines 555-590)
+- Adds program to MetaSummarizer.evaluated_since_last_meta
+- If meta_rec_interval reached:
+  - Calls meta_summarizer.update_meta_memory(best_program):
+    - Queries meta LLM with best programs
+    - Generates recommendations
+    - Updates meta memory state
+  - Writes meta_recommendations.txt file
+  - Saves meta cost to program metadata
+
+Step 8: Best Solution Update (Line 552)
+- Calls _update_best_solution():
+  - Gets best program from database
+  - Copies gen_{generation}/ to best/ directory
+  - Updates self.best_program_id
+
+Main Evolution Loop
+
+File: shinka/core/runner.py - run()
+
+Loop Structure (Lines 315-350)
+
+`python
+while completed_generations < target_gens or len(running_jobs) > 0:
+    1. Check for completed jobs
+    2. Process completed jobs
+    3. Update completed generations count
+    4. Submit new jobs if capacity available
+    5. Sleep 2 seconds
+`
+
+Step 1: Check Completed Jobs (Line 320)
+- Calls _check_completed_jobs():
+  - Iterates through self.running_jobs
+  - For each job:
+    - Local: Checks if ProcessWithLogging process is still alive
+    - SLURM: Checks squeue or job status file
+  - Returns list of completed RunningJob objects
+  - Removes completed from self.running_jobs
+
+Step 2: Process Completed Jobs (Lines 323-325)
+- For each completed job:
+  - Calls _process_completed_job(job):
+    - Gets job results
+    - Reads evaluated code
+    - Creates Program object
+    - Adds to database
+    - Updates meta memory
+    - Updates LLM selection algorithm
+    - Updates best solution
+
+Step 3: Update Completed Generations (Line 328)
+- Calls _update_completed_generations():
+  - Queries database for last_iteration
+  - Checks for contiguous generations (0, 1, 2, ...)
+  - Sets self.completed_generations to highest contiguous generation
+
+Step 4: Submit New Jobs (Lines 342-347)
+- If queue has capacity and more generations needed:
+  - Calls _submit_new_job():
+    - Samples parent and inspirations
+    - Generates code patch
+    - Checks novelty
+    - Submits job asynchronously
+    - Adds to self.running_jobs
+
+Job Submission Flow
+
+File: shinka/core/runner.py - _submit_new_job()
+
+Step 1: Generation Setup (Lines 618-629)
+- Sets current_gen = self.next_generation_to_submit
+- Increments self.next_generation_to_submit
+- Creates directories:
+  - gen_{current_gen}/main.{lang_ext}
+  - gen_{current_gen}/results/
+
+Step 2: Get Meta Recommendations (Line 632)
+- Calls meta_summarizer.get_current():
+  - Returns current meta recommendations
+  - Returns meta summary
+  - Returns meta scratchpad
+
+Step 3: Parent and Inspiration Sampling (Lines 635-673)
+- For Generation 0: Uses initial program (already handled)
+- For Generation > 0: 
+  - Novelty Loop (Lines 648-721):
+    - Attempts up to max_novelty_attempts times
+    - Resample Loop (Lines 650-681):
+      - Attempts up to max_patch_resamples times
+      - Calls db.sample():
+        - Samples parent using selection strategy:
+          - weighted: Weighted by score
+          - power_law: Power-law distribution
+          - beam_search: Top-k candidates
+        - Samples archive inspirations (MAP-Elites archive)
+        - Samples top-k inspirations (best programs)
+      - Calls run_patch() to generate code mutation
+      - If patch succeeds, breaks resample loop
+    - Novelty Check (Lines 682-721):
+      - Gets code embedding
+      - Calls novelty_judge.assess_novelty_with_rejection_sampling():
+        - Computes similarity to existing programs
+        - If similarity < threshold: Accepts
+        - If similarity >= threshold: Queries novelty LLM
+        - LLM determines if code is novel enough
+      - If accepted, breaks novelty loop
+
+Step 4: Patch Generation (Lines 666-673)
+- Calls run_patch():
+  - Samples patch type (diff/full/cross)
+  - Constructs prompt with parent, inspirations, meta recommendations
+  - Queries LLM for code patch
+  - Applies patch to parent code
+  - Returns (code_diff, meta_patch_data, num_applied)
+
+Step 5: Job Submission (Line 736)
+- Calls scheduler.submit_async(exec_fname, results_dir):
+  - Local: Starts subprocess with ProcessWithLogging
+  - SLURM: Submits sbatch job
+  - Returns job ID (process or SLURM job ID)
+
+Step 6: Track Running Job (Lines 739-754)
+- Creates RunningJob object:
+  - Stores job_id, file paths, generation, parent_id
+  - Stores inspiration IDs, code_diff, meta_patch_data
+  - Stores pre-computed embedding and costs
+- Appends to self.running_jobs
+
+Patch Generation Flow
+
+File: shinka/core/runner.py - run_patch()
+
+Step 1: Prompt Construction (Lines 972-980)
+- Calls prompt_sampler.sample():
+  - Samples patch type: diff, full, or cross
+  - Constructs system message:
+    - Base task system message
+    - Patch-type-specific instructions
+    - Meta recommendations (if available)
+  - Constructs user message:
+    - Parent code
+    - Performance metrics
+    - Archive inspirations (if any)
+    - Top-k inspirations (if any)
+    - Text feedback (if enabled)
+
+Step 2: LLM Query Loop (Lines 1010-1104)
+- Attempts up to max_patch_attempts times:
+  - Calls llm.query():
+    - Samples model and parameters
+    - Queries LLM with prompt
+    - Returns QueryResult with code patch
+  - Extracts patch name and description from response
+  - Applies patch:
+    - Diff patch: Applies unified diff format
+    - Full patch: Replaces entire code block
+    - Cross patch: Combines components from inspirations
+  - If patch applies successfully:
+    - Saves patched code to gen_{generation}/main.{lang_ext}
+    - Breaks loop
+  - If patch fails:
+    - Constructs error message
+    - Adds to message history
+    - Retries
+
+Step 3: Metadata Collection (Lines 1111-1124)
+- Collects metadata:
+  - Patch type, costs, attempts
+  - Patch name, description
+  - Error messages (if any)
+  - LLM result, diff summary
+- Returns (code_diff, meta_edit_data, num_applied)
+
+Job Execution Flow
+
+File: shinka/launch/scheduler.py and shinka/launch/local.py
+
+Local Job Execution
+
+1. Command Construction (Lines 98-143)
+   - Builds command: python evaluate.py --program_path {exec_fname} --results_dir {results_dir}
+   - Adds conda environment activation if specified
+
+2. Process Launch (local.py)
+   - Creates ProcessWithLogging:
+     - Starts subprocess with command
+     - Redirects stdout/stderr to log files
+     - Returns process object
+
+3. Evaluation Script (examples/circle_packing/evaluate.py)
+   - Reads program from --program_path
+   - Executes program
+   - Computes metrics (correctness, scores)
+   - Writes results to JSON in --results_dir
+
+SLURM Job Execution
+
+1. Job Submission (slurm.py)
+   - Creates SBATCH script with:
+     - Resource requirements (CPU, GPU, memory, time)
+     - Conda environment activation
+     - Module loading
+     - Command execution
+   - Submits via sbatch command
+   - Returns SLURM job ID
+
+2. Job Monitoring (scheduler.py)
+   - Polls squeue or checks job status file
+   - Returns True if running, False if completed
+
+Job Completion Flow
+
+File: shinka/core/runner.py - _process_completed_job()
+
+Step 1: Results Retrieval (Lines 783-787)
+- Calls scheduler.get_job_results(job_id, results_dir):
+  - Local: Reads JSON from results directory
+  - SLURM: Reads JSON from SLURM output directory
+  - Returns results dictionary
+
+Step 2: Code Reading (Lines 790-794)
+- Reads evaluated code from job.exec_fname
+- Uses pre-computed embedding from job.code_embedding
+
+Step 3: Results Extraction (Lines 806-819)
+- Extracts:
+  - correct: Boolean
+  - combined_score: Float
+  - public_metrics, private_metrics: Dicts
+  - text_feedback: String
+  - stdout_log, stderr_log: Strings
+
+Step 4: Database Insertion (Lines 822-846)
+- Creates Program object with:
+  - All metadata from job.meta_patch_data
+  - Pre-computed embedding and costs
+  - Results from evaluation
+- Calls db.add(program):
+  - Inserts into database
+  - Updates archive
+  - Updates island assignments
+  - Handles migrations between islands
+
+Step 5: Meta Memory Update (Lines 849-881)
+- Adds program to meta summarizer
+- If interval reached:
+  - Updates meta recommendations
+  - Writes meta output file
+  - Saves meta cost
+
+Step 6: LLM Selection Update (Lines 883-913)
+- If dynamic selection enabled:
+  - Gets model name from program metadata
+  - Computes reward (score improvement)
+  - Updates bandit algorithm:
+    - Updates model statistics
+    - Adjusts selection probabilities
+  - Logs update
+
+Step 7: Best Solution Update (Line 916)
+- Calls _update_best_solution():
+  - Gets best program from database
+  - Copies generation directory to best/
+
+Database Operations
+
+File: shinka/database/dbase.py
+
+Program Storage
+- Table Schema: programs table with columns:
+  - id, code, language, generation
+  - parent_id, archive_inspiration_ids, top_k_inspiration_ids
+  - combined_score, correct, public_metrics, private_metrics
+  - embedding, metadata, island_idx
+
+Key Operations
+
+1. db.add(program):
+   - Inserts program into database
+   - Updates archive (MAP-Elites style)
+   - Assigns to island
+   - Updates parent's children_count
+
+2. db.sample():
+   - Samples parent using selection strategy
+   - Samples archive inspirations (diverse solutions)
+   - Samples top-k inspirations (best solutions)
+   - Handles island-based sampling
+
+3. db.get_best_program():
+   - Queries for program with highest combined_score where correct=True
+
+4. db.get_programs_by_generation(generation):
+   - Returns all programs from specific generation
+
+LLM Query Flow
+
+File: shinka/llm/llm.py and shinka/llm/query.py
+
+Step 1: Model Selection (Lines 241-248 in llm.py)
+- If dynamic selection enabled:
+  - Calls llm_selection.sample():
+    - Uses bandit algorithm (UCB) to select model
+    - Returns model name
+- Else:
+  - Randomly samples from model_names
+
+Step 2: Parameter Sampling (Lines 242-248)
+- Calls sample_model_kwargs():
+  - Samples temperature from list
+  - Samples max_tokens from list
+  - Samples reasoning_efforts (for reasoning models)
+  - Returns kwargs dictionary
+
+Step 3: Client Creation (query.py - Line 196)
+- Calls get_client_llm(model_name):
+  - Determines provider (OpenAI, Anthropic, etc.)
+  - Creates appropriate client:
+    - OpenAI: openai.OpenAI()
+    - Anthropic: anthropic.Anthropic()
+    - DeepSeek: openai.OpenAI(base_url="https://api.deepseek.com")
+    - Gemini: openai.OpenAI(base_url="https://generativelanguage.googleapis.com/...")
+
+Step 4: Query Routing (Lines 199-208)
+- Routes to appropriate query function:
+  - query_openai() for OpenAI models
+  - query_anthropic() for Claude models
+  - query_deepseek() for DeepSeek models
+  - query_gemini() for Gemini models
+
+Step 5: API Call (Example: query_openai())
+- Formats messages:
+  - System message
+  - Message history
+  - Current user message
+- Calls client.responses.create():
+  - Sends to OpenAI API
+  - Returns response with content
+- Extracts content from response
+- Counts tokens
+- Calculates cost
+
+Step 6: Result Construction
+- Creates QueryResult:
+  - content: Generated text
+  - input_tokens, output_tokens: Token counts
+  - cost: API cost
+  - new_msg_history: Updated conversation history
+- Returns QueryResult
+
+Key Data Structures
+
+Program
+`python
+Program(
+    id: str                    # UUID
+    code: str                  # Full source code
+    generation: int             # Generation number
+    parent_id: str              # Parent program ID
+    combined_score: float       # Fitness score
+    correct: bool              # Functional correctness
+    embedding: List[float]     # Code embedding vector
+    metadata: Dict             # Additional metadata
+)
+`
+
+RunningJob
+`python
+RunningJob(
+    job_id: Union[str, Process]  # Job identifier
+    exec_fname: str              # Code file path
+    generation: int              # Generation number
+    parent_id: str              # Parent program ID
+    code_diff: str              # Generated patch
+    code_embedding: List[float] # Pre-computed embedding
+)
+`
+
+Summary Flow Diagram
+
+`
+Command Line
+    ↓
+Hydra Config Loading
+    ↓
+EvolutionRunner.__init__()
+    ├─ Database Setup
+    ├─ LLM Clients Setup
+    ├─ Job Scheduler Setup
+    └─ Helper Components Setup
+    ↓
+run()
+    ├─ Generation 0 (Sequential)
+    │   ├─ Generate/Copy Initial Program
+    │   ├─ Execute Program
+    │   ├─ Get Embedding
+    │   ├─ Add to Database
+    │   └─ Update Meta Memory
+    │
+    └─ Main Loop (Parallel)
+        ├─ Check Completed Jobs
+        ├─ Process Completed Jobs
+        │   ├─ Read Results
+        │   ├─ Add to Database
+        │   ├─ Update Meta Memory
+        │   └─ Update LLM Selection
+        │
+        └─ Submit New Jobs
+            ├─ Sample Parent/Inspirations
+            ├─ Generate Patch (LLM)
+            ├─ Check Novelty
+            ├─ Submit Job (Async)
+            └─ Track in Queue
+``
+
+This completes the detailed flow documentation. Every step from command execution to program evolution is traced through the codebase.
+

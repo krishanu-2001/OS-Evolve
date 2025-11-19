@@ -1,0 +1,86 @@
+database_config:
+  archive_size: 10
+  db_path: results/circle_packing/20251118_223402_weighted_fast/evolution_db.sqlite
+  elite_selection_ratio: 0.3
+  embedding_model: text-embedding-3-small
+  enforce_island_separation: true
+  exploitation_alpha: 1.0
+  exploitation_ratio: 0.2
+  island_elitism: true
+  migration_interval: 10
+  migration_rate: 0.1
+  num_archive_inspirations: 4
+  num_beams: 5
+  num_islands: 2
+  num_top_k_inspirations: 2
+  parent_selection_lambda: 10.0
+  parent_selection_strategy: weighted
+evolution_config:
+  code_embed_sim_threshold: 1.0
+  embedding_model: gemini-embedding-001
+  init_program_path: initial.py
+  job_type: local
+  language: python
+  llm_dynamic_selection: null
+  llm_dynamic_selection_kwargs: {}
+  llm_kwargs:
+    max_tokens: 16384
+    temperatures:
+    - 0.0
+    - 0.5
+  llm_models:
+  - gemini-2.5-flash
+  max_novelty_attempts: 3
+  max_parallel_jobs: 1
+  max_patch_attempts: 3
+  max_patch_resamples: 3
+  meta_llm_kwargs: {}
+  meta_llm_models: null
+  meta_max_recommendations: 5
+  meta_rec_interval: null
+  novelty_llm_kwargs: {}
+  novelty_llm_models: null
+  num_generations: 5
+  patch_type_probs:
+  - 0.6
+  - 0.3
+  - 0.1
+  patch_types:
+  - diff
+  - full
+  - cross
+  results_dir: results/circle_packing/20251118_223402_weighted_fast
+  task_sys_msg: 'You are an expert mathematician specializing in circle packing problems
+    and computational geometry. The best known result for the sum of radii when packing
+    26 circles in a unit square is 2.635.
+
+
+    Key directions to explore:
+
+    1. The optimal arrangement likely involves variable-sized circles
+
+    2. A pure hexagonal arrangement may not be optimal due to edge effects
+
+    3. The densest known circle packings often use a hybrid approach
+
+    4. The optimization routine is critically important - simple physics-based models
+    with carefully tuned parameters
+
+    5. Consider strategic placement of circles at square corners and edges
+
+    6. Place larger circles near the center and smaller near the edges
+
+    7. Math literature suggests special arrangements for specific n
+
+    8. You can use scipy.optimize to refine radii given fixed centers and constraints
+
+
+    Be creative and try to find a new solution.'
+  use_text_feedback: false
+job_config:
+  conda_env: null
+  eval_program_path: evaluate.py
+  extra_cmd_args: {}
+  time: null
+results_directory: results/circle_packing/20251118_223402_weighted_fast
+timestamp: '2025-11-18T22:34:06.176605'

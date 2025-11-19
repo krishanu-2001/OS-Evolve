@@ -1,0 +1,20 @@
+<NAME>
+hybrid_greedy_repacking
+</NAME>
+
+<DESCRIPTION>
+Extend the local greedy repacking sweep to include diagonal moves and add an intermediate step size (0.0025) between 0.005 and 0.001. This allows finer, more flexible adjustments and can help fill small gaps that axis-aligned moves alone miss.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        for step in [0.01, 0.005, 0.001]:
+            for dx, dy in [(step,0),(-step,0),(0,step),(0,-step)]:
+=======
+        for step in [0.01, 0.005, 0.0025, 0.001]:
+            for dx, dy in [
+                (step,0),(-step,0),(0,step),(0,-step),
+                (step,step),(step,-step),(-step,step),(-step,-step)
+            ]:
+>>>>>>> REPLACE
+</DIFF>

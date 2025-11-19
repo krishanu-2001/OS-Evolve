@@ -1,0 +1,17 @@
+{
+    "combined_score": 2.4638632162621397,
+    "public": {
+        "centers_str": "  centers[0] = (0.5873, 0.7926)\n  centers[1] = (0.7197, 0.5281)\n  centers[2] = (0.4036, 0.5953)\n  centers[3] = (0.3247, 0.9111)\n  centers[4] = (0.8649, 0.1361)\n  centers[5] = (0.8953, 0.3981)\n  centers[6] = (0.5064, 0.9250)\n  centers[7] = (0.1246, 0.1263)\n  centers[8] = (0.0896, 0.6404)\n  centers[9] = (0.6876, 0.9173)\n  centers[10] = (0.8922, 0.8771)\n  centers[11] = (0.4395, 0.7629)\n  centers[12] = (0.2473, 0.5554)\n  centers[13] = (0.1107, 0.8788)\n  centers[14] = (0.4755, 0.2779)\n  centers[15] = (0.2694, 0.7255)\n  centers[16] = (0.5339, 0.4613)\n  centers[17] = (0.1175, 0.3955)\n  centers[18] = (0.5703, 0.6404)\n  centers[19] = (0.9048, 0.6329)\n  centers[20] = (0.3479, 0.4238)\n  centers[21] = (0.6050, 0.1046)\n  centers[22] = (0.7308, 0.7278)\n  centers[23] = (0.3736, 0.0948)\n  centers[24] = (0.2894, 0.2662)\n  centers[25] = (0.6827, 0.3179)",
+        "num_circles": 26
+    },
+    "private": {
+        "reported_sum_of_radii": 2.4638632162621397
+    },
+    "execution_time_mean": 1.0673635309794918,
+    "execution_time_std": 0.0,
+    "num_valid_runs": 0,
+    "num_invalid_runs": 1,
+    "all_validation_errors": [
+        "Circles 0 & 11 overlap. Dist: 0.1508, Sum Radii: 0.1514"
+    ]
+}

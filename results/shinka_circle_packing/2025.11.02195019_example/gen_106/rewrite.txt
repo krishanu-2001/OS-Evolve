@@ -1,0 +1,225 @@
+# EVOLVE-BLOCK-START
+"""Hybrid corner-edge + hex lattice with adaptive SA and refined greedy for 26 circles"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Construct and optimize 26 circles in a unit square,
+    placing larger circles at corners and edges, 
+    hex lattice inside, then refining with physics,
+    adaptive simulated annealing, and exhaustive greedy.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    np.random.seed(1234)
+    n = 26
+
+    # --- 1) Strategic initial placement: corners, edges + hex lattice interior ---
+
+    # Place 4 large circles near corners
+    corner_pos = np.array([
+        [0.05, 0.05],
+        [0.05, 0.95],
+        [0.95, 0.05],
+        [0.95, 0.95]
+    ])
+
+    # Place 4 intermediate large circles at midpoints of edges
+    edge_mid_pos = np.array([
+        [0.5, 0.05],
+        [0.5, 0.95],
+        [0.05, 0.5],
+        [0.95, 0.5]
+    ])
+
+    # Remaining 18 circles packed hexagonally in center region [0.15,0.85]^2
+    remaining = n - (len(corner_pos) + len(edge_mid_pos))
+    m = int(np.ceil(np.sqrt(remaining / 0.866)))  # hex density approx
+
+    dx = 0.7 / (m - 1)  # spacing in x in [0.15,0.85]
+    dy = dx * np.sqrt(3) / 2  # y spacing for hex lattice
+
+    pts = []
+    for i in range(m):
+        for j in range(m):
+            x = 0.15 + j * dx + (i % 2) * dx/2
+            y = 0.15 + i * dy
+            if x <= 0.85 and y <= 0.85:
+                pts.append((x,y))
+    pts = np.array(pts)
+
+    # Select closest 18 points to center to keep compactness
+    center_point = np.array([0.5,0.5])
+    dist_to_center = np.linalg.norm(pts - center_point, axis=1)
+    idx = np.argsort(dist_to_center)[:remaining]
+    hex_centers = pts[idx]
+
+    # Combine all centers
+    centers = np.vstack([corner_pos, edge_mid_pos, hex_centers])
+
+    # Add slight jitter to break symmetries
+    jitter = (np.random.rand(n,2) - 0.5) * 0.015 
+    centers += jitter
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # --- 2) Force-based relaxation with careful step size and increased iterations ---
+
+    radii = compute_max_radii(centers)
+    alpha = 0.02
+    max_iters = 700
+
+    for it in range(max_iters):
+        forces = np.zeros((n, 2))
+
+        # Overlap repulsion forces between circles
+        for i in range(n):
+            for j in range(i+1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1]) + 1e-12
+                allowed = radii[i] + radii[j]
+                if dist < allowed:
+                    overlap = (allowed - dist)/dist
+                    delta = dxy * overlap
+                    forces[i] += delta
+                    forces[j] -= delta
+
+        # Border corrective forces
+        for i in range(n):
+            x,y = centers[i]
+            r = radii[i]
+            if x - r < 0:
+                forces[i,0] += (r - x)*1.2
+            if x + r > 1:
+                forces[i,0] -= (x + r -1)*1.2
+            if y - r < 0:
+                forces[i,1] += (r - y)*1.2
+            if y + r > 1:
+                forces[i,1] -= (y + r -1)*1.2
+
+        centers += alpha * forces
+        centers = np.clip(centers, 0.01, 0.99)
+        radii = compute_max_radii(centers)
+        alpha *= 0.995
+
+    # --- 3) Adaptive simulated annealing with multi-circle moves and dynamic schedule ---
+
+    centers_sa = centers.copy()
+    radii_sa = radii.copy()
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_sum = np.sum(radii_sa)
+
+    T = 0.004
+    cooling = 0.9945
+    max_T = 0.015
+    no_improve = 0
+    stagnation_limit = 120
+
+    for it in range(1800):
+        # Multi-circle moves every 80 iterations for better exploration
+        if it % 80 == 0:
+            count = np.random.randint(2,5)
+            idxs = np.random.choice(n, count, replace=False)
+        else:
+            idxs = [np.random.randint(n)]
+
+        old_pos = centers_sa[idxs].copy()
+        scale = 0.007 * (1 - it/1800)
+        delta = np.random.randn(len(idxs), 2) * scale
+        centers_sa[idxs] = np.clip(centers_sa[idxs] + delta, 0.01, 0.99)
+
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = np.sum(radii_tmp)
+        dE = sum_new - np.sum(radii_sa)
+
+        accept_prob = np.exp(dE / max(T,1e-12)) if dE < 0 else 1.0
+        if dE > 0 or np.random.rand() < accept_prob:
+            radii_sa = radii_tmp
+            if sum_new > best_sum + 1e-9:
+                best_sum = sum_new
+                best_centers = centers_sa.copy()
+                best_radii = radii_tmp.copy()
+                no_improve = 0
+            else:
+                no_improve += 1
+        else:
+            centers_sa[idxs] = old_pos
+            no_improve += 1
+
+        # Adaptive temperature control
+        if no_improve > stagnation_limit:
+            T = min(T * 1.15, max_T)
+            no_improve = 0
+        else:
+            T *= cooling
+
+    centers, radii = best_centers.copy(), best_radii.copy()
+
+    # --- 4) Local greedy refinement with additional directions and finer stepsize ---
+
+    directions = np.array([
+        [1,0], [-1,0], [0,1], [0,-1],
+        [1,1], [1,-1], [-1,1], [-1,-1],
+        [2,1], [1,2], [-2,1], [-1,2],
+        [2,-1], [1,-2], [-2,-1], [-1,-2]
+    ])
+    directions = directions / np.linalg.norm(directions, axis=1)[:, None]
+
+    step_sizes = [0.008, 0.004, 0.002, 0.001]
+
+    for i in range(n):
+        pos = centers[i].copy()
+        for step in step_sizes:
+            improved = True
+            while improved:
+                improved = False
+                for d in directions:
+                    cand = pos + d * step
+                    cand = np.clip(cand, 0.01, 0.99)
+                    centers[i] = cand
+                    radii_cand = compute_max_radii(centers)
+                    if np.sum(radii_cand) > np.sum(radii):
+                        radii = radii_cand
+                        pos = cand
+                        improved = True
+                centers[i] = pos
+
+    return centers, radii
+
+def compute_max_radii(centers):
+    """
+    Compute max radii for fixed centers in [0,1]^2 with no overlap,
+    using iterative relaxation scaling until convergence.
+    """
+    n = centers.shape[0]
+    xs, ys = centers[:,0], centers[:,1]
+    radii = np.minimum.reduce([xs, ys, 1 - xs, 1 - ys])
+
+    for _ in range(60):
+        max_change = 0.0
+        for i in range(n):
+            for j in range(i+1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1])
+                max_sum = radii[i] + radii[j]
+                if max_sum > dist and dist > 1e-12:
+                    scale = dist / max_sum
+                    old_i, old_j = radii[i], radii[j]
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    max_change = max(max_change, abs(radii[i] - old_i), abs(radii[j] - old_j))
+        if max_change < 1e-7:
+            break
+
+    return radii
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

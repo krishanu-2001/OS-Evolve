@@ -1,0 +1,4 @@
+{
+    "correct": false,
+    "error": "operands could not be broadcast together with shapes (25,25) (26,26) "
+}

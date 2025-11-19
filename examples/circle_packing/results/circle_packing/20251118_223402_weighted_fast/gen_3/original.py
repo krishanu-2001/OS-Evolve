@@ -1,0 +1,126 @@
+# EVOLVE-BLOCK-START
+"""Constructor-based circle packing for n=26 circles"""
+
+import numpy as np
+
+
+def construct_packing():
+    """
+    Construct a specific arrangement of 26 circles in a unit square
+    that attempts to maximize the sum of their radii.
+
+    Returns:
+        Tuple of (centers, radii, sum_of_radii)
+        centers: np.array of shape (26, 2) with (x, y) coordinates
+        radii: np.array of shape (26) with radius of each circle
+        sum_of_radii: Sum of all radii
+    """
+    # Initialize arrays for 26 circles
+    n = 26
+    centers = np.zeros((n, 2))
+
+    # This revised strategy uses a hybrid grid-like and perimeter-filling approach
+    # for n=26 circles, aiming for a denser and more evenly distributed packing.
+
+    # 1. Main Grid (4x4 = 16 circles)
+    # These form the central, denser part of the packing.
+    # Spacing for a 4x4 grid, centered. Each coordinate is 1/8, 3/8, 5/8, 7/8.
+    grid_start_offset = 1.0 / 8.0 # Starting position for the first circle center
+    x_coords = np.linspace(grid_start_offset, 1.0 - grid_start_offset, 4)
+    y_coords = np.linspace(grid_start_offset, 1.0 - grid_start_offset, 4)
+
+    k = 0
+    for x in x_coords:
+        for y in y_coords:
+            centers[k] = [x, y]
+            k += 1
+    # Circles 0-15 are now set.
+
+    # 2. Edge Circles (8 circles)
+    # Place circles along the mid-points of each quarter edge section.
+    # These are positioned relatively close to the square's borders to maximize boundary filling.
+    edge_offset = 0.07 # Distance from the square border for these circles
+    # Along the bottom edge (y = edge_offset)
+    centers[16] = [0.25, edge_offset]
+    centers[17] = [0.75, edge_offset]
+    # Along the top edge (y = 1 - edge_offset)
+    centers[18] = [0.25, 1 - edge_offset]
+    centers[19] = [0.75, 1 - edge_offset]
+    # Along the left edge (x = edge_offset)
+    centers[20] = [edge_offset, 0.25]
+    centers[21] = [edge_offset, 0.75]
+    # Along the right edge (x = 1 - edge_offset)
+    centers[22] = [1 - edge_offset, 0.25]
+    centers[23] = [1 - edge_offset, 0.75]
+    # Circles 16-23 are now set.
+
+    # Total circles so far: 16 (grid) + 8 (edge) = 24 circles.
+    # Remaining: 26 - 24 = 2 circles.
+
+    # 3. Corner Circles (2 circles)
+    # Place the last two circles in opposite corners to strategically fill these regions.
+    # Placing them in opposite corners tends to distribute them better initially
+    # and reduces immediate high-density overlap with other fixed centers.
+    corner_offset = 0.07 # Using same offset as edge_offset for consistency
+    centers[24] = [corner_offset, corner_offset] # Bottom-left corner
+    centers[25] = [1 - corner_offset, 1 - corner_offset] # Top-right corner
+    # Circles 24-25 are now set. All 26 circles are explicitly placed.
+
+    # Clip to ensure all circle centers are strictly within the unit square [0.01, 0.99].
+    # This prevents centers from being exactly on the boundary, which would force a zero radius,
+    # and ensures radii can always be positive.
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # Compute maximum valid radii for this configuration
+    radii = compute_max_radii(centers)
+    sum_of_radii = np.sum(radii)
+    return centers, radii
+
+
+def compute_max_radii(centers):
+    """
+    Compute the maximum possible radii for each circle position
+    such that they don't overlap and stay within the unit square.
+
+    Args:
+        centers: np.array of shape (n, 2) with (x, y) coordinates
+
+    Returns:
+        np.array of shape (n) with radius of each circle
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+
+    # First, limit by distance to square borders
+    for i in range(n):
+        x, y = centers[i]
+        # Distance to borders
+        radii[i] = min(x, y, 1 - x, 1 - y)
+
+    # Then, limit by distance to other circles
+    # Each pair of circles with centers at distance d can have
+    # sum of radii at most d to avoid overlap
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+
+            # If current radii would cause overlap
+            if radii[i] + radii[j] > dist:
+                # Scale both radii proportionally
+                scale = dist / (radii[i] + radii[j])
+                radii[i] *= scale
+                radii[j] *= scale
+
+    return radii
+
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

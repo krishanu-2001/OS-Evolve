@@ -1,0 +1,186 @@
+--- a/original.py
++++ b/original.py
+@@ -1,101 +1,119 @@
+ # EVOLVE-BLOCK-START
+-"""Hybrid hexagonal initialization + hill‐climbing for n=26 circle packing"""
++"""Adaptive global optimization for n=26 circle packing"""
+ 
+ import numpy as np
+ 
+ def construct_packing():
+     """
+-    Initialize 26 circle centers on a hexagonal lattice, then perform
+-    a hill-climbing local search to maximize the sum of radii.
+-    Returns:
+-        centers: np.array (26,2)
+-        radii:   np.array (26,)
++    Use a multi-start global sampling and local gradient refinement
++    to find a high-quality circle packing maximizing sum of radii.
+     """
+     n = 26
+-    # Row layout: sums to 26
+-    row_counts = [6, 5, 6, 5, 4]
+-    max_cols = max(row_counts)
++    num_starts = 50
++    max_iterations = 200
+     margin = 0.02
+-    dx = (1 - 2*margin) / max_cols
+-    h  = dx * np.sqrt(3) / 2
+ 
+-    # Build initial hex grid
+-    centers = np.zeros((n, 2))
+-    idx = 0
+-    for rid, cnt in enumerate(row_counts):
+-        x_start = margin + (max_cols - cnt) * dx / 2
+-        y = margin + rid * h
+-        for c in range(cnt):
+-            centers[idx, 0] = x_start + c * dx
+-            centers[idx, 1] = y
+-            idx += 1
++    best_sum = -np.inf
++    best_centers = None
++    best_radii = None
+ 
+-    # Compute initial radii & sum
+-    best_centers = centers.copy()
+-    best_radii   = compute_max_radii(best_centers)
+-    best_sum     = best_radii.sum()
++    rng = np.random.default_rng(12345)
+ 
+-    # Hill‐climbing parameters
+-    iters = 5000
+-    initial_alpha = dx * 0.5
+-    rng = np.random.default_rng(42)
+-
+-    for t in range(iters):
+-        # decaying step size
+-        alpha = initial_alpha * (1 - t / iters)
+-        i = int(rng.integers(n))
+-        cand_centers = best_centers.copy()
+-        # random perturbation
+-        delta = rng.uniform(-alpha, alpha, size=2)
+-        cand_centers[i] += delta
+-        # keep inside margins
+-        cand_centers[i] = np.clip(cand_centers[i], margin, 1 - margin)
+-        # recompute radii & evaluate
+-        cand_radii = compute_max_radii(cand_centers)
+-        s = cand_radii.sum()
+-        if s > best_sum:
+-            best_sum     = s
+-            best_centers = cand_centers
+-            best_radii   = cand_radii
++    for _ in range(num_starts):
++        # Random initialization within margins
++        centers = rng.uniform(margin, 1 - margin, size=(n, 2))
++        # Local refinement via gradient descent
++        centers, radii = refine_packing(centers, max_iterations, margin)
++        current_sum = np.sum(radii)
++        if current_sum > best_sum:
++            best_sum = current_sum
++            best_centers = centers
++            best_radii = radii
+ 
+     return best_centers, best_radii
+ 
++def refine_packing(centers, max_iter, margin):
++    """
++    Iteratively adjust centers to improve radii sum using gradient-based steps.
++    """
++    n = centers.shape[0]
++    for _ in range(max_iter):
++        radii = compute_max_radii(centers)
++        # Compute gradient estimate: move centers to increase radii
++        grad = np.zeros_like(centers)
++        for i in range(n):
++            # Gradient: push center away from neighbors and borders
++            # to allow larger radii
++            # Border gradients
++            x, y = centers[i]
++            grad[i, 0] = (2 * (margin - x) if x - margin < radii[i] else 0) \
++                         + (2 * (x - (1 - margin)) if (1 - margin) - x < radii[i] else 0)
++            grad[i, 1] = (2 * (margin - y) if y - margin < radii[i] else 0) \
++                         + (2 * (y - (1 - margin)) if (1 - margin) - y < radii[i] else 0)
++            # Pairwise repulsion gradients
++            for j in range(i + 1, n):
++                d_vec = centers[j] - centers[i]
++                dist = np.linalg.norm(d_vec)
++                if dist < 1e-8:
++                    continue
++                overlap = radii[i] + radii[j] - dist
++                if overlap > 0:
++                    # Push centers apart
++                    direction = d_vec / dist
++                    grad[i] -= direction * overlap
++                    grad[j] += direction * overlap
++        # Update centers with step size
++        step_size = 0.01
++        centers += step_size * grad
++        # Keep within margins
++        centers = np.clip(centers, margin, 1 - margin)
++    radii = compute_max_radii(centers)
++    return centers, radii
+ 
+ def compute_max_radii(centers):
+     """
+-    Given circle centers, compute the maximal non-overlapping radii
+-    within the unit square by iteratively enforcing border and pairwise constraints.
++    Compute maximum radii respecting borders and non-overlap.
+     """
+     n = centers.shape[0]
++    radii = np.empty(n)
++    # Limit by borders
+     radii = np.minimum.reduce([
+-        centers[:,0],            # distance to left
+-        centers[:,1],            # distance to bottom
+-        1 - centers[:,0],        # right
+-        1 - centers[:,1]         # top
++        centers[:, 0],  # distance to left
++        1 - centers[:, 0],  # distance to right
++        centers[:, 1],  # bottom
++        1 - centers[:, 1]  # top
+     ])
+ 
+-    # Enforce non-overlap: for each pair, if sum > dist, scale both
+-    for i in range(n):
+-        for j in range(i+1, n):
+-            d = np.hypot(*(centers[i] - centers[j]))
+-            if d <= 0:
+-                # coincident centers — collapse both
+-                radii[i] = radii[j] = 0.0
+-            else:
+-                ri, rj = radii[i], radii[j]
+-                if ri + rj > d:
+-                    scale = d / (ri + rj)
++    # Enforce non-overlap via iterative relaxation
++    for _ in range(10):
++        for i in range(n):
++            for j in range(i + 1, n):
++                d_vec = centers[j] - centers[i]
++                dist = np.linalg.norm(d_vec)
++                if dist < 1e-8:
++                    continue
++                max_overlap = dist - 1e-8
++                sum_radii = radii[i] + radii[j]
++                if sum_radii > max_overlap:
++                    scale = max_overlap / sum_radii
+                     radii[i] *= scale
+                     radii[j] *= scale
+     return radii
+ 
++# This part remains fixed (not evolved)
++def run_packing():
++    """Run the circle packing constructor for n=26"""
++    centers, radii = construct_packing()
++    # Calculate the sum of radii
++    sum_radii = np.sum(radii)
++    return centers, radii, sum_radii
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

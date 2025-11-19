@@ -1,0 +1,195 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+
+def construct_packing():
+    """
+    Pack 26 circles in the unit square via inflation-relax cycles
+    and local refinement.
+    Returns centers (26×2) and radii (26).
+    """
+    np.random.seed(123)
+    n = 26
+    margin = 0.01
+
+    # 1) Initialization: jittered hex-like grid
+    centers = strategic_init(n, margin)
+
+    # 2) Start with zero radii, then inflate & relax
+    radii = np.zeros(n)
+    centers, radii = inflate_and_relax(centers, radii, margin)
+
+    # 3) Local candidate refinement
+    centers, radii = local_refinement(centers, radii, margin)
+
+    return centers, radii
+
+def strategic_init(n, margin):
+    """
+    Initialize n centers on a jittered grid inside [margin,1-margin]^2.
+    """
+    M = int(np.ceil(np.sqrt(n * 1.5)))
+    xs = np.linspace(margin, 1 - margin, M)
+    ys = np.linspace(margin, 1 - margin, M)
+    grid = np.array([[x, y] for x in xs for y in ys])
+    # Select n points closest to the square center
+    center = np.array([0.5, 0.5])
+    d = np.linalg.norm(grid - center, axis=1)
+    idx = np.argsort(d)[:n]
+    pts = grid[idx]
+    # Small jitter to break symmetry
+    jitter = (np.random.rand(n,2) - 0.5) * (1.0/M)
+    pts = np.clip(pts + jitter, margin, 1 - margin)
+    return pts
+
+def inflate_and_relax(centers, radii, margin):
+    """
+    Repeat: find minimal gap to any wall or circle‐circle pair,
+    inflate all radii by 75% of that, relax overlaps by repulsive forces,
+    and recompute true maximal radii. Stop when gap < tol.
+    """
+    n = len(centers)
+    tol = 1e-3
+    max_iter = 80
+
+    for _ in range(max_iter):
+        # compute minimal gap
+        # to walls
+        dw = np.minimum.reduce([
+            centers[:,0] - margin,
+            centers[:,1] - margin,
+            (1 - margin) - centers[:,0],
+            (1 - margin) - centers[:,1]
+        ]) - radii
+        min_dw = dw.min()
+        # to other circles
+        min_dp = np.inf
+        for i in range(n):
+            for j in range(i+1,n):
+                dij = np.linalg.norm(centers[i]-centers[j]) - (radii[i]+radii[j])
+                if dij < min_dp:
+                    min_dp = dij
+        gap = min(min_dw, min_dp)
+        if gap < tol:
+            break
+        dr = 0.75 * gap
+        radii += dr
+        # recompute true maximal radii
+        radii = compute_max_radii(centers)
+        # relax positions by repulsive forces
+        centers = relax_positions(centers, radii, margin)
+        # recompute after relax
+        radii = compute_max_radii(centers)
+
+    return centers, radii
+
+def relax_positions(centers, radii, margin):
+    """
+    Apply repulsive forces for overlaps and wall constraints
+    to redistribute centers.
+    """
+    n = len(centers)
+    C = centers.copy()
+    alpha = 0.1
+    for _ in range(40):
+        F = np.zeros_like(C)
+        # circle‐circle repulsion
+        for i in range(n):
+            for j in range(i+1,n):
+                dxy = C[i] - C[j]
+                dist = np.hypot(dxy[0], dxy[1]) + 1e-8
+                allow = radii[i] + radii[j]
+                if dist < allow:
+                    overlap = (allow - dist)
+                    push = (overlap/dist) * 0.5
+                    F[i] +=  push * dxy
+                    F[j] -=  push * dxy
+        # wall forces
+        for i in range(n):
+            x,y = C[i]
+            r = radii[i]
+            if x - r < margin:
+                F[i,0] += (margin + r - x)
+            if x + r > 1 - margin:
+                F[i,0] -= (x + r - (1 - margin))
+            if y - r < margin:
+                F[i,1] += (margin + r - y)
+            if y + r > 1 - margin:
+                F[i,1] -= (y + r - (1 - margin))
+        C += alpha * F
+        C = np.clip(C, margin, 1 - margin)
+    return C
+
+def compute_max_radii(centers):
+    """
+    Solve for maximal non‐overlapping radii by iteratively enforcing
+    wall and pairwise constraints.
+    """
+    n = len(centers)
+    xs, ys = centers[:,0], centers[:,1]
+    radii = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+    for _ in range(50):
+        changed = False
+        for i in range(n):
+            for j in range(i+1,n):
+                d = np.linalg.norm(centers[i]-centers[j])
+                if radii[i] + radii[j] > d and d>1e-12:
+                    scale = d / (radii[i] + radii[j])
+                    ri_old, rj_old = radii[i], radii[j]
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    if abs(radii[i]-ri_old)>1e-6 or abs(radii[j]-rj_old)>1e-6:
+                        changed = True
+        if not changed:
+            break
+    return radii
+
+def compute_radius_at(i, p, centers, radii):
+    """
+    Given candidate position p for circle i, compute its max radius
+    not overlapping others or walls.
+    """
+    r = min(p[0], p[1], 1-p[0], 1-p[1])
+    for j, (cj, rj) in enumerate(zip(centers, radii)):
+        if j==i: continue
+        dist = np.linalg.norm(p - cj) - rj
+        r = min(r, dist)
+    return max(r, 0.0)
+
+def local_refinement(centers, radii, margin):
+    """
+    For each circle, sample nearby candidate moves and accept any
+    that locally increase the circle's radius.
+    """
+    n = len(centers)
+    C = centers.copy()
+    R = radii.copy()
+    rng = np.random.default_rng(456)
+    for _ in range(2):
+        for i in range(n):
+            ci, ri = C[i].copy(), R[i]
+            best_r = ri
+            best_c = ci.copy()
+            # sample around
+            for _ in range(30):
+                disp = (rng.random(2)*2 - 1)*ri
+                p = np.clip(ci + disp, margin, 1-margin)
+                r_new = compute_radius_at(i, p, C, R)
+                if r_new > best_r + 1e-6:
+                    best_r = r_new
+                    best_c = p.copy()
+            C[i] = best_c
+            R[i] = best_r
+        # after all moves, globally rectify radii
+        R = compute_max_radii(C)
+    return C, R
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

@@ -1,0 +1,70 @@
+<NAME>
+add_corner_and_edge_circles_initialization
+</NAME>
+
+<DESCRIPTION>
+Introduce a strategic initialization step that places larger circles at the four corners and midpoints of edges of the unit square, with smaller circles arranged inside. This leverages the insight that placing larger circles at corners and edges can reduce edge effects and improve packing density. The rest of the circles are initialized in a hexagonal lattice inside the remaining space. This hybrid initialization should provide a better starting configuration for subsequent force relaxation and annealing.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # 1) Hexagonal lattice initialization within [0.05,0.95]^2
+    m = int(np.ceil(np.sqrt(n / 0.866)))
+    dx = 0.9 / (m - 1)
+    dy = dx * np.sqrt(3) / 2
+    pts = []
+    for i in range(m):
+        for j in range(m):
+            x = 0.05 + j * dx + (i % 2) * (dx / 2)
+            y = 0.05 + i * dy
+            if x <= 0.95 and y <= 0.95:
+                pts.append((x, y))
+    pts = np.array(pts)
+    # Select top n by distance to border
+    d_border = np.min(np.stack([pts, 1 - pts], axis=2), axis=2).min(axis=1)
+    idx = np.argsort(-d_border)[:n]
+    centers = pts[idx].copy()
+    # Jitter to break symmetry
+    centers += (np.random.rand(n, 2) - 0.5) * 0.03
+    centers = np.clip(centers, 0.01, 0.99)
+=======
+    # 1) Place larger circles at corners and edges
+    centers = []
+    # corners
+    corner_positions = np.array([
+        [0.05, 0.05],
+        [0.05, 0.95],
+        [0.95, 0.05],
+        [0.95, 0.95]
+    ])
+    centers.extend(corner_positions)
+    # midpoints of edges
+    edge_positions = np.array([
+        [0.5, 0.05],
+        [0.5, 0.95],
+        [0.05, 0.5],
+        [0.95, 0.5]
+    ])
+    centers.extend(edge_positions)
+    # Remaining circles in hexagonal lattice inside [0.15,0.85]^2
+    remaining = n - len(centers)
+    m = int(np.ceil(np.sqrt(remaining / 0.866)))
+    dx = 0.7 / (m - 1)
+    dy = dx * np.sqrt(3) / 2
+    pts = []
+    for i in range(m):
+        for j in range(m):
+            x = 0.15 + j * dx + (i % 2) * (dx / 2)
+            y = 0.15 + i * dy
+            if x <= 0.85 and y <= 0.85:
+                pts.append((x, y))
+    pts = np.array(pts)
+    # Select top remaining by distance to border
+    d_border = np.min(np.stack([pts, 1 - pts], axis=2), axis=2).min(axis=1)
+    idx = np.argsort(-d_border)[:remaining]
+    centers.extend(pts[idx])
+    centers = np.array(centers)
+    # Jitter to break symmetry
+    centers += (np.random.rand(n, 2) - 0.5) * 0.02
+    centers = np.clip(centers, 0.01, 0.99)
+>>>>>>> REPLACE

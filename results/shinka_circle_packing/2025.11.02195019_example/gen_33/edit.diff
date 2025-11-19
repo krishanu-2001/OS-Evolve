@@ -1,0 +1,251 @@
+--- a/original.py
++++ b/original.py
+@@ -1,133 +1,138 @@
+ # EVOLVE-BLOCK-START
+ import numpy as np
+-import math
+ 
+-def greedy_initial(n, samples=8000, seed=0):
+-    """
+-    Sequentially place n circles.
+-    At each step, sample 'samples' random points and pick the one
+-    with the largest feasible radius given existing circles.
+-    """
+-    rnd = np.random.RandomState(seed)
+-    centers = []
+-    radii = []
+-    for k in range(n):
+-        pts = rnd.rand(samples,2)
+-        best_r = -1.0
+-        best_p = None
+-        if k == 0:
+-            # for first circle just pick the best by walls
+-            xs = pts[:,0]; ys = pts[:,1]
+-            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+-            idx = np.argmax(rs)
+-            best_r = rs[idx]; best_p = pts[idx]
+-        else:
+-            arr_centers = np.array(centers)
+-            arr_radii = np.array(radii)
+-            for p in pts:
+-                # radius limited by walls
+-                r = min(p[0], p[1], 1-p[0], 1-p[1])
+-                # limit by existing circles
+-                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+-                r = min(r, d.min())
+-                if r > best_r:
+-                    best_r = r; best_p = p
+-        centers.append(best_p)
+-        radii.append(max(best_r, 1e-6))
+-    return np.array(centers), np.array(radii)
++def layout_candidates():
++    # Candidate row splits summing to 26 with 4-6 rows, max 7 per row
++    return [
++        [6,5,6,5,4],
++        [5,5,6,5,5],
++        [5,6,5,6,4],
++        [4,6,6,5,5],
++        [6,6,5,5,4],
++        [5,6,6,4,5]
++    ]
+ 
+-def compute_radius_at(i, centers, radii):
+-    """
+-    Given center i, compute its maximal radius not overlapping others or walls.
+-    """
+-    x,y = centers[i]
+-    # wall limit
+-    r = min(x, y, 1-x, 1-y)
+-    if len(centers) > 1:
+-        # exclude self
+-        others = np.delete(centers, i, axis=0)
+-        rads  = np.delete(radii, i)
+-        d = np.linalg.norm(others - centers[i], axis=1) - rads
+-        r = min(r, d.min())
+-    return max(r, 0.0)
++def hex_row_centers(count, y, width=0.9):
++    # Generate centers for a hex row with count circles at height y
++    if count == 1:
++        return np.array([[0.5, y]])
++    spacing = (width - 0.1) / (count - 1) if count > 1 else 0
++    xs = 0.05 + np.arange(count) * spacing
++    centers = np.stack([xs, np.full(count, y)], axis=1)
++    jitter = (np.random.rand(count) - 0.5) * 0.014
++    centers[:,0] += jitter
++    return centers
+ 
+-def simulated_annealing(centers, radii, iters=12000, T0=0.1, Tend=1e-4, seed=1):
+-    """
+-    Refine the placement by simulated annealing: perturb one circle at a time,
+-    recompute its max radius, and accept moves that improve total radius or
+-    stochastically based on temperature.
+-    """
+-    rnd = np.random.RandomState(seed)
++def assign_size_gradient(centers):
++    # Larger radii near center (0.5,0.5)
++    dist_center = np.linalg.norm(centers - 0.5, axis=1)
++    max_dist = np.sqrt(2*0.5**2)
++    norm_dist = dist_center / max_dist
++    size_factor = np.exp(- (norm_dist*4)**2)
++    size_factor = 0.1 + 0.9 * (size_factor - size_factor.min())/(size_factor.max() - size_factor.min() + 1e-10)
++    return size_factor
++
++def compute_max_radii(centers, relaxation_iters=5):
+     n = centers.shape[0]
+-    best_centers = centers.copy()
+-    best_radii  = radii.copy()
+-    best_sum = radii.sum()
++    radii = np.minimum.reduce([centers[:,0], centers[:,1], 1 - centers[:,0], 1 - centers[:,1]])
++    for _ in range(relaxation_iters):
++        diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]
++        dist = np.linalg.norm(diff, axis=2) + np.eye(n)
++        sum_r = radii[:, None] + radii[None, :]
++        overlap_mask = (sum_r > dist) & (~np.eye(n, dtype=bool))
++        scale = np.ones_like(dist)
++        scale[overlap_mask] = dist[overlap_mask] / sum_r[overlap_mask]
++        min_scale = scale.min(axis=1)
++        radii *= min_scale
++        radii = np.maximum(radii, 1e-6)
++    return radii
+ 
+-    curr_centers = centers.copy()
+-    curr_radii = radii.copy()
+-    curr_sum = best_sum
+-    T = T0
+-    decay = (Tend/T0)**(1.0/iters)
++def compute_forces(centers, radii):
++    n = centers.shape[0]
++    forces = np.zeros_like(centers)
++    diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]
++    dist = np.linalg.norm(diff, axis=2) + np.eye(n)
++    sum_r = radii[:, None] + radii[None, :]
++    overlap = sum_r - dist
++    overlap_mask = (overlap > 0) & (~np.eye(n, dtype=bool))
++    direction = np.zeros_like(diff)
++    direction[overlap_mask] = diff[overlap_mask] / dist[overlap_mask][:, None]
++    strength = np.zeros_like(dist)
++    strength[overlap_mask] = (overlap[overlap_mask] ** 2) / dist[overlap_mask]
++    forces += np.sum(direction * strength[:, :, None], axis=1)
++    forces -= np.sum(direction * strength[:, :, None], axis=0)
++    x, y = centers[:,0], centers[:,1]
++    r = radii
++    # Boundary forces
++    overlap_l = r - x
++    forces[:,0] += np.where(overlap_l > 0, overlap_l**2, 0)
++    overlap_r = (x + r) - 1
++    forces[:,0] -= np.where(overlap_r > 0, overlap_r**2, 0)
++    overlap_b = r - y
++    forces[:,1] += np.where(overlap_b > 0, overlap_b**2, 0)
++    overlap_t = (y + r) - 1
++    forces[:,1] -= np.where(overlap_t > 0, overlap_t**2, 0)
++    return forces
+ 
+-    for it in range(iters):
+-        # pick a random circle to move
+-        i = rnd.randint(n)
+-        old_p = curr_centers[i].copy()
+-        old_r = curr_radii[i]
+-        # propose new center with small gaussian step
+-        step = rnd.randn(2) * 0.02
+-        new_p = old_p + step
+-        # keep inside
+-        new_p = np.clip(new_p, 0.0, 1.0)
+-        curr_centers[i] = new_p
+-        # recompute only its radius
+-        new_r = compute_radius_at(i, curr_centers, curr_radii)
+-        if new_r <= 1e-8:
+-            # reject move
+-            curr_centers[i] = old_p
+-        else:
+-            new_sum = curr_sum - old_r + new_r
+-            delta = new_sum - curr_sum
+-            if delta >= 0 or rnd.rand() < math.exp(delta / T):
+-                # accept
+-                curr_radii[i] = new_r
+-                curr_sum = new_sum
+-                # track best
+-                if curr_sum > best_sum:
+-                    best_sum = curr_sum
+-                    best_centers[:] = curr_centers
+-                    best_radii[:]  = curr_radii
+-            else:
+-                # reject
+-                curr_centers[i] = old_p
+-        # cool down
+-        T *= decay
+-
+-    return best_centers, best_radii
++def update_centers(centers, forces, alpha, momentum, prev_update):
++    update = alpha * forces + momentum * prev_update
++    centers_new = centers + update
++    centers_new = np.clip(centers_new, 0.01, 0.99)
++    return centers_new, update
+ 
+ def construct_packing():
+     """
+-    Build and optimize 26-circle packing via greedy initialization
+-    followed by simulated annealing refinement.
++    Build a layered circle packing with iterative relaxation.
+     """
++    np.random.seed(42)
+     n = 26
+-    # Phase 1: greedy placement
+-    centers, radii = greedy_initial(n, samples=8000, seed=42)
+-    # Phase 2: simulated annealing
+-    centers, radii = simulated_annealing(centers, radii,
+-                                         iters=15000,
+-                                         T0=0.05,
+-                                         Tend=1e-5,
+-                                         seed=999)
+-    return centers, radii
+-
++    best_centers = None
++    best_radii = None
++    best_sum = -np.inf
++    for rows in layout_candidates():
++        if sum(rows) != n:
++            continue
++        nrows = len(rows)
++        y_margin = 0.07
++        y_positions = np.linspace(y_margin, 1 - y_margin, nrows)
++        centers_list = []
++        for i, count in enumerate(rows):
++            row_centers = hex_row_centers(count, y_positions[i], width=0.9)
++            centers_list.append(row_centers)
++        centers = np.vstack(centers_list)
++        size_factor = assign_size_gradient(centers)
++        base_radii = np.minimum.reduce([centers[:,0], centers[:,1], 1 - centers[:,0], 1 - centers[:,1]])
++        radii = np.clip(base_radii, 0, None)
++        target_radii = 0.06 * size_factor
++        radii = np.minimum(radii, target_radii)
++        radii = compute_max_radii(centers, relaxation_iters=10)
++        alpha = 0.03
++        momentum = 0.65
++        prev_update = np.zeros_like(centers)
++        max_iters = 800
++        for it in range(max_iters):
++            forces = compute_forces(centers, radii)
++            centers, prev_update = update_centers(centers, forces, alpha, momentum, prev_update)
++            prev_radii = radii.copy()
++            radii = compute_max_radii(centers, relaxation_iters=5)
++            radii = np.minimum(radii * 1.002, target_radii)
++            alpha *= 0.9985
++            momentum *= 0.999
++            if it > 400 and np.sum(np.abs(radii - prev_radii)) < 1e-6:
++                break
++        sum_radii = np.sum(radii)
++        if sum_radii > best_sum:
++            best_sum = sum_radii
++            best_centers = centers.copy()
++            best_radii = radii.copy()
++    return best_centers, best_radii
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

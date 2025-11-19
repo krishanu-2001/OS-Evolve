@@ -1,0 +1,243 @@
+--- a/original.py
++++ b/original.py
+@@ -1,136 +1,133 @@
+ # EVOLVE-BLOCK-START
+-"""Modular physics-based circle packing for n=26 circles with vectorized operations"""
++import numpy as np
++import math
+ 
+-import numpy as np
++def greedy_initial(n, samples=8000, seed=0):
++    """
++    Sequentially place n circles.
++    At each step, sample 'samples' random points and pick the one
++    with the largest feasible radius given existing circles.
++    """
++    rnd = np.random.RandomState(seed)
++    centers = []
++    radii = []
++    for k in range(n):
++        pts = rnd.rand(samples,2)
++        best_r = -1.0
++        best_p = None
++        if k == 0:
++            # for first circle just pick the best by walls
++            xs = pts[:,0]; ys = pts[:,1]
++            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
++            idx = np.argmax(rs)
++            best_r = rs[idx]; best_p = pts[idx]
++        else:
++            arr_centers = np.array(centers)
++            arr_radii = np.array(radii)
++            for p in pts:
++                # radius limited by walls
++                r = min(p[0], p[1], 1-p[0], 1-p[1])
++                # limit by existing circles
++                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
++                r = min(r, d.min())
++                if r > best_r:
++                    best_r = r; best_p = p
++        centers.append(best_p)
++        radii.append(max(best_r, 1e-6))
++    return np.array(centers), np.array(radii)
+ 
+-def initialize_centers(n, seed=0):
++def compute_radius_at(i, centers, radii):
+     """
+-    Initialize circle centers on a jittered grid inside [0.1,0.9]^2.
++    Given center i, compute its maximal radius not overlapping others or walls.
+     """
+-    np.random.seed(seed)
+-    gx = np.linspace(0.1, 0.9, 6)
+-    gy = np.linspace(0.1, 0.9, 5)
+-    pts = np.array([(x, y) for x in gx for y in gy])
+-    centers = pts[:n].copy()
+-    jitter = (np.random.rand(n, 2) - 0.5) * 0.02
+-    centers += jitter
+-    return np.clip(centers, 0.01, 0.99)
++    x,y = centers[i]
++    # wall limit
++    r = min(x, y, 1-x, 1-y)
++    if len(centers) > 1:
++        # exclude self
++        others = np.delete(centers, i, axis=0)
++        rads  = np.delete(radii, i)
++        d = np.linalg.norm(others - centers[i], axis=1) - rads
++        r = min(r, d.min())
++    return max(r, 0.0)
+ 
+-def compute_max_radii(centers, relaxation_iters=5):
++def simulated_annealing(centers, radii, iters=12000, T0=0.1, Tend=1e-4, seed=1):
+     """
+-    Compute max possible radii so circles fit inside [0,1]^2 and don't overlap.
+-    Uses iterative relaxation to enforce pairwise constraints.
++    Refine the placement by simulated annealing: perturb one circle at a time,
++    recompute its max radius, and accept moves that improve total radius or
++    stochastically based on temperature.
+     """
++    rnd = np.random.RandomState(seed)
+     n = centers.shape[0]
+-    xs, ys = centers[:, 0], centers[:, 1]
+-    radii = np.minimum.reduce([xs, ys, 1 - xs, 1 - ys])
++    best_centers = centers.copy()
++    best_radii  = radii.copy()
++    best_sum = radii.sum()
+ 
+-    for _ in range(relaxation_iters):
+-        # Vectorized pairwise distance matrix
+-        diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]  # shape (n,n,2)
+-        dist = np.linalg.norm(diff, axis=2) + np.eye(n)  # add eye to avoid zero distance on diagonal
+-        sum_radii = radii[:, np.newaxis] + radii[np.newaxis, :]
+-        overlap_mask = (sum_radii > dist) & (dist > 0)
++    curr_centers = centers.copy()
++    curr_radii = radii.copy()
++    curr_sum = best_sum
++    T = T0
++    decay = (Tend/T0)**(1.0/iters)
+ 
+-        # For each overlapping pair, compute scale factor
+-        scale = np.ones_like(dist)
+-        scale[overlap_mask] = dist[overlap_mask] / sum_radii[overlap_mask]
++    for it in range(iters):
++        # pick a random circle to move
++        i = rnd.randint(n)
++        old_p = curr_centers[i].copy()
++        old_r = curr_radii[i]
++        # propose new center with small gaussian step
++        step = rnd.randn(2) * 0.02
++        new_p = old_p + step
++        # keep inside
++        new_p = np.clip(new_p, 0.0, 1.0)
++        curr_centers[i] = new_p
++        # recompute only its radius
++        new_r = compute_radius_at(i, curr_centers, curr_radii)
++        if new_r <= 1e-8:
++            # reject move
++            curr_centers[i] = old_p
++        else:
++            new_sum = curr_sum - old_r + new_r
++            delta = new_sum - curr_sum
++            if delta >= 0 or rnd.rand() < math.exp(delta / T):
++                # accept
++                curr_radii[i] = new_r
++                curr_sum = new_sum
++                # track best
++                if curr_sum > best_sum:
++                    best_sum = curr_sum
++                    best_centers[:] = curr_centers
++                    best_radii[:]  = curr_radii
++            else:
++                # reject
++                curr_centers[i] = old_p
++        # cool down
++        T *= decay
+ 
+-        # For each circle, find minimal scale imposed by any overlap
+-        min_scale = scale.min(axis=1)
+-        radii *= min_scale
+-        # Prevent radii from becoming negative or zero
+-        radii = np.maximum(radii, 1e-6)
+-    return radii
+-
+-def compute_forces(centers, radii):
+-    """
+-    Compute repulsion forces between overlapping circles and corrective forces from borders.
+-    Returns force array of shape (n,2).
+-    """
+-    n = centers.shape[0]
+-    forces = np.zeros_like(centers)
+-
+-    # Vectorized pairwise differences and distances
+-    diff = centers[:, np.newaxis, :] - centers[np.newaxis, :, :]  # (n,n,2)
+-    dist = np.linalg.norm(diff, axis=2) + np.eye(n)  # (n,n), add eye to avoid zero division
+-    sum_radii = radii[:, np.newaxis] + radii[np.newaxis, :]
+-
+-    overlap = sum_radii - dist
+-    overlap_mask = (overlap > 0) & (np.eye(n) == 0)  # exclude diagonal
+-
+-    # Compute normalized direction vectors for overlaps
+-    direction = np.zeros_like(diff)
+-    direction[overlap_mask] = diff[overlap_mask] / dist[overlap_mask][:, None]
+-
+-    # Repulsion force magnitude proportional to overlap
+-    force_magnitudes = np.zeros((n, n))
+-    force_magnitudes[overlap_mask] = overlap[overlap_mask] / dist[overlap_mask]
+-
+-    # Sum forces from all pairs
+-    forces += np.sum(direction * force_magnitudes[:, :, None], axis=1)
+-    forces -= np.sum(direction * force_magnitudes[:, :, None], axis=0)
+-
+-    # Border corrective forces
+-    x, y = centers[:, 0], centers[:, 1]
+-    r = radii
+-
+-    # Left border
+-    left_overlap = r - x
+-    forces[:, 0] += np.where(left_overlap > 0, left_overlap, 0)
+-    # Right border
+-    right_overlap = (x + r) - 1
+-    forces[:, 0] -= np.where(right_overlap > 0, right_overlap, 0)
+-    # Bottom border
+-    bottom_overlap = r - y
+-    forces[:, 1] += np.where(bottom_overlap > 0, bottom_overlap, 0)
+-    # Top border
+-    top_overlap = (y + r) - 1
+-    forces[:, 1] -= np.where(top_overlap > 0, top_overlap, 0)
+-
+-    return forces
+-
+-def update_centers(centers, forces, alpha, momentum, prev_update):
+-    """
+-    Update centers with forces, step size alpha, and momentum.
+-    """
+-    update = alpha * forces + momentum * prev_update
+-    new_centers = centers + update
+-    new_centers = np.clip(new_centers, 0.01, 0.99)
+-    return new_centers, update
++    return best_centers, best_radii
+ 
+ def construct_packing():
+     """
+-    Construct and optimize arrangement of 26 circles in unit square
+-    using modular force-based inflate-and-relax algorithm.
+-    Returns:
+-        centers: np.array (26,2)
+-        radii: np.array (26,)
++    Build and optimize 26-circle packing via greedy initialization
++    followed by simulated annealing refinement.
+     """
+     n = 26
+-    centers = initialize_centers(n)
+-    radii = compute_max_radii(centers)
+-
+-    alpha = 0.025
+-    momentum = 0.5
+-    prev_update = np.zeros_like(centers)
+-    max_iters = 700
+-
+-    for _ in range(max_iters):
+-        forces = compute_forces(centers, radii)
+-        centers, prev_update = update_centers(centers, forces, alpha, momentum, prev_update)
+-        radii = compute_max_radii(centers)
+-        alpha *= 0.997  # gradual decay for stability
+-
++    # Phase 1: greedy placement
++    centers, radii = greedy_initial(n, samples=8000, seed=42)
++    # Phase 2: simulated annealing
++    centers, radii = simulated_annealing(centers, radii,
++                                         iters=15000,
++                                         T0=0.05,
++                                         Tend=1e-5,
++                                         seed=999)
+     return centers, radii
+ 
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii
