@@ -1,0 +1,47 @@
+{
+    "combined_score": 1.0,
+    "public": {
+        "builds": [
+            {
+                "label": "build_agent_cfs_test",
+                "return_code": 0,
+                "duration_sec": 2.361879587173462,
+                "log_path": "results/build_agent_cfs_test.log"
+            },
+            {
+                "label": "build_cfs_hol_test",
+                "return_code": 0,
+                "duration_sec": 1.3548433780670166,
+                "log_path": "results/build_cfs_hol_test.log"
+            }
+        ],
+        "hol_log_metrics": {
+            "threads": 32.0,
+            "slow_index": 0.0,
+            "slow_ms": 150.0,
+            "fast_ms": 5.0,
+            "fast_start_ms_p50": 0.35461,
+            "fast_start_ms_p95": 4.44042
+        },
+        "hol_csv_metrics": {
+            "csv_total_threads": 32.0,
+            "csv_avg_runtime_ms": 33.007559375,
+            "csv_active_window_ms": 178.346071,
+            "csv_throughput_tps": 179.4264365936046,
+            "csv_avg_fast_queue_ms": 1.247889741935484
+        }
+    },
+    "private": {
+        "commands": [
+            {
+                "label": "run_cfs_hol_test",
+                "return_code": 0,
+                "duration_sec": 5.955170154571533,
+                "log_path": "results/run_cfs_hol_test.log",
+                "stdout_capture": "/mydata/ghost-userspace/metrics/output.log"
+            }
+        ]
+    },
+    "log_excerpt": "Starting CFS HoL: N=32 slow_idx=0 slow_ms=150 fast_ms=5\nHoL summary: fast start_ms p50=0.35461 p95=4.44042 (ms)\nMetrics written to metrics/cfs_hol.csv\n",
+    "csv_path": "/mydata/ghost-userspace/metrics/cfs_hol.csv"
+}
