@@ -173,3 +173,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# remove results of ShinkaEvolve builds
+results_cfs_scheduler*/
+ghost-userspace/

@@ -410,10 +410,10 @@ if __name__ == "__main__":
         default=True,
         help="Run bazel/cfs_hol_test commands under sudo.",
     )
-    parser.add_argument("--hol_threads", type=int, default=32)
+    parser.add_argument("--hol_threads", type=int, default=128)
     parser.add_argument("--hol_slow_index", type=int, default=0)
     parser.add_argument("--hol_slow_ms", type=int, default=150)
-    parser.add_argument("--hol_fast_ms", type=int, default=5)
+    parser.add_argument("--hol_fast_ms", type=int, default=25)
     parser.add_argument(
         "--ghost_cpus",
         type=str,
