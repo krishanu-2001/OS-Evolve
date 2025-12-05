@@ -250,7 +250,7 @@ def compute_combined_score(
 def main(
     program_path: str,
     results_dir: str,
-    ghost_root: Optional[str] = None,
+    ghost_root: Optional[str],
     use_sudo: bool,
     hol_threads: int,
     hol_slow_index: int,
