@@ -70,7 +70,7 @@ def default_ghost_root() -> Path:
     """Infers the ghost-userspace checkout relative to this script."""
     this_file = Path(__file__).resolve()
     shinka_root = this_file.parents[2]
-    return (shinka_root.parent / "ghost-userspace").resolve()
+    return (shinka_root / "ghost-userspace").resolve()
 
 
 def parse_program_sources(program_text: str) -> Dict[str, str]:
@@ -250,7 +250,7 @@ def compute_combined_score(
 def main(
     program_path: str,
     results_dir: str,
-    ghost_root: Optional[str],
+    ghost_root: Optional[str] = None,
     use_sudo: bool,
     hol_threads: int,
     hol_slow_index: int,
@@ -268,6 +268,7 @@ def main(
     sources = parse_program_sources(program_text)
 
     repo_root = Path(ghost_root).resolve() if ghost_root else default_ghost_root()
+
     if not repo_root.exists():
         raise FileNotFoundError(f"ghost-userspace repo not found at {repo_root}")
 

@@ -1,0 +1,138 @@
+
+make O=/users/saikri/ghost-kernel/build/kernel menuconfig
+# just save and exit the ghost kernel
+
+# 'n' implies the number of cores you can assign to execute the *make* command parallelly.
+make -j40 O=/users/saikri/ghost-kernel/build/kernel
+sudo make -j40 O=/users/saikri/ghost-kernel/build/kernel modules_install install PAHOLE=/usr/local/bin/pahole
+make -j40 oldconfig
+make bindeb-pkg -j40
+
+
+# certificate problem
+sudo mkdir -p /usr/local/src/debian
+sudo apt install linux-source
+sudo cp -v /usr/src/linux-source-*/debian/canonical-*.pem /usr/local/src/debian/
+sudo apt purge linux-source*
+
+# update the build/kernel/.config file
+# Certificates for signature checking
+#
+CONFIG_MODULE_SIG_KEY="certs/signing_key.pem"
+CONFIG_MODULE_SIG_KEY_TYPE_RSA=y
+CONFIG_MODULE_SIG_KEY_TYPE_ECDSA=y
+CONFIG_SYSTEM_TRUSTED_KEYRING=y
+CONFIG_SYSTEM_TRUSTED_KEYS="/usr/local/src/debian/canonical-certs.pem"
+CONFIG_SYSTEM_EXTRA_CERTIFICATE=y
+CONFIG_SYSTEM_EXTRA_CERTIFICATE_SIZE=4096
+CONFIG_SECONDARY_TRUSTED_KEYRING=y
+CONFIG_SYSTEM_BLACKLIST_KEYRING=y
+CONFIG_SYSTEM_BLACKLIST_HASH_LIST=""
+CONFIG_SYSTEM_REVOCATION_LIST=y
+CONFIG_SYSTEM_REVOCATION_KEYS="/usr/local/src/debian/canonical-revoked-certs.pem"
+# end of Certificates for signature checking
+
+
+#
+# Install pahole version 1.23
+#
+sudo rm -f /usr/local/bin/pahole
+sudo rm -f /usr/bin/pahole
+sudo rm -f /usr/local/lib/libdwarves*
+sudo ldconfig
+
+sudo apt update
+sudo apt install -y build-essential cmake pkg-config zlib1g-dev \
+                    libelf-dev libdw-dev libdwarf-dev
+
+cd ~
+git clone https://git.kernel.org/pub/scm/devel/pahole/pahole.git
+cd pahole
+git checkout v1.23
+
+git clean -fdx
+mkdir build && cd build
+
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON ..
+make -j$(nproc)
+sudo make install
+
+echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/local.conf
+sudo ldconfig
+
+export PATH=/usr/local/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+echo 'export PATH=/usr/local/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+which pahole
+pahole --version
+ldd $(which pahole) | grep dwarves
+
+hash -r
+
+
+
+#
+# Canonical certs
+#
+
+mkdir -p debian
+openssl req -new -x509 -newkey rsa:2048 -keyout debian/dummy-key.pem \
+    -out debian/canonical-certs.pem -nodes -days 3650 \
+    -subj "/CN=Dummy Kernel Cert/"
+
+
+==============================================================================
+#### Loading the right grub #####
+
+sudo apt install kexec-tools
+
+sudo kexec -l /boot/vmlinuz-5.11.0+ \
+    --initrd=/boot/initrd.img-5.11.0+ \
+    --reuse-cmdline
+
+sudo systemctl kexec
+
+uname -r 
+## should show 5.11.0+
+
+
+==============================================================================
+#### Userspace ####
+
+wget -c https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64
+
+#Please change the directory names etc. where ever required.
+chmod +x bazelisk-linux-amd64
+sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
+
+#To verify your Bazel installation, run:
+bazel version
+
+sudo bazel build -c opt agent_cfs
+sudo bazel build -c opt simple_exp
+sudo ./bazel-bin/agent_cfs --ghost_cpus 2-3
+
+# running simple_cfs experiment
+sudo ./bazel-bin/simple_cfs --create_enclave_and_agent --ghost_cpus=1-5
+
+# running head-of-line experiment
+sudo ./bazel-bin/cfs_hol_test --create_enclave_and_agent --ghost_cpus=1-5 \
+--hol_threads=32 --hol_slow_index=0 --hol_slow_ms=150 --hol_fast_ms=5
+
+
+#
+# cleanup need to clean up enclaves as we do more experimentss
+#
+ls /sys/fs/ghost/
+echo destroy > /sys/fs/ghost/enclave_1/ctl
+
+
+==============================================================================
+#### Mounted filespace ####
+sudo chown -R saikri /mydata
+
+
+

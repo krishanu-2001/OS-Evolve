@@ -1,0 +1,2 @@
+cd examples/scheduler
+python run_evo.py --num_generations=1 --results_dir=results_cfs_scheduler 
