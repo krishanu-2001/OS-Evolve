@@ -204,6 +204,8 @@ def query(
         query_fn = query_deepseek
     elif model_name in GEMINI_MODELS.keys():
         query_fn = query_gemini
+    elif model_name.startswith("bedrock-openai-"):
+        query_fn = query_openai
     else:
         raise ValueError(f"Model {model_name} not supported.")
     result = query_fn(

@@ -78,6 +78,20 @@ def get_client_llm(model_name: str, structured_output: bool = False) -> Tuple[An
                 client,
                 mode=instructor.Mode.GEMINI_JSON,
             )
+    elif model_name.startswith("bedrock"):
+        # Extract the actual model name (e.g., "bedrock-openai-anthropic.claude-3-5-sonnet-20241022-v2:0")
+        # The format is: bedrock-openai-<actual-bedrock-model-id>
+        actual_model = model_name.replace("bedrock", "")
+        region = os.getenv("AWS_REGION_NAME", "us-west-2")
+        api_key = os.getenv("BEDROCK_API_KEY")
+        if not api_key:
+            raise ValueError("BEDROCK_API_KEY environment variable is not set")
+        client = openai.OpenAI(
+            base_url=f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
+            api_key=api_key
+        )
+        if structured_output:
+            client = instructor.from_openai(client, mode=instructor.Mode.TOOLS_STRICT)
     else:
         raise ValueError(f"Model {model_name} not supported.")
 

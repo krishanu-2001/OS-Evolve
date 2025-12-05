@@ -68,17 +68,18 @@ def build_configs(num_generations: int, results_dir: str):
         llm_models=[
             # "gemini-2.5-pro",
             # "gemini-2.5-flash",
-            # "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0",
             # "o4-mini",
-            "gpt-5",
-            "gpt-5-mini",
+            # "gpt-5",
+            # "gpt-5-mini",
+            # bedrock/meta.llama3-70b-instruct-v1:0
         ],
         llm_kwargs=dict(
             temperatures=[0.0, 0.4, 0.8],
             max_tokens=32768,
         ),
         meta_rec_interval=10,
-        meta_llm_models=["gpt-5-mini"],
+        meta_llm_models=["bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0"],
         meta_llm_kwargs=dict(
             temperatures=[0.0],
             max_tokens=8192,
@@ -87,6 +88,7 @@ def build_configs(num_generations: int, results_dir: str):
         results_dir=results_dir,
         max_novelty_attempts=3,
         use_text_feedback=False,
+        embedding_model="bedrock-amazon.titan-embed-text-v1",  # Use Bedrock embeddings
     )
     return evo_config, job_config, db_config
 

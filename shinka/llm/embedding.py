@@ -57,6 +57,21 @@ def get_client_model(model_name: str) -> tuple[Union[openai.OpenAI, str], str]:
         genai.configure(api_key=api_key)
         client = "gemini"  # Use string identifier for Gemini
         model_to_use = model_name
+    elif model_name.startswith("bedrock"):
+        # Extract the actual model name (e.g., "bedrock-anthropic.claude-3-5-sonnet-20241022-v2:0")
+        # The format is: bedrock-<actual-bedrock-model-id>
+        actual_model = model_name.replace("bedrock", "").lstrip("-")
+        region = os.getenv("AWS_REGION_NAME", "us-west-2")
+        api_key = os.getenv("BEDROCK_API_KEY")
+        if not api_key:
+            raise ValueError("BEDROCK_API_KEY environment variable is not set")
+        client = openai.OpenAI(
+            base_url=f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
+            api_key=api_key
+        )
+        # For embeddings, we need to use the actual model identifier
+        # Bedrock OpenAI-compatible endpoint uses the full model identifier
+        model_to_use = actual_model if actual_model else model_name
     else:
         raise ValueError(f"Invalid embedding model: {model_name}")
 
