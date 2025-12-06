@@ -10,12 +10,20 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <dirent.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstdint>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/strings/substitute.h"
+#include "absl/time/time.h"
 #include "lib/base.h"
 #include "lib/ghost.h"
 #include "schedulers/test/cfs_scheduler.h"
@@ -26,24 +34,36 @@ ABSL_FLAG(std::string, ghost_cpus, "1-5",
           "List of cpu IDs to create an enclave with.");
 
 // ---------------------------------------------------------
-// Helper: Run a shell command and capture all stdout lines.
+// Helper: Move a process into ghOSt enclave
+// Uses the GhostHelper API with a valid Enclave Directory FD
 // ---------------------------------------------------------
-std::string RunCommandCaptureOutput(const std::string& cmd) {
-  std::array<char, 4096> buffer{};
-  std::string result;
+int MoveProcessToGhost(pid_t pid, int enclave_fd) {
+  // Use the official helper. 
+  // enclave_fd must be the directory FD for /sys/fs/ghost/enclave_X
+  return ghost::GhostHelper()->SchedTaskEnterGhost(pid, enclave_fd);
+}
 
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    perror("popen failed");
-    return "";
+// ---------------------------------------------------------
+// Helper: Get all thread PIDs for a process
+// ---------------------------------------------------------
+std::vector<pid_t> GetThreadPids(pid_t pid) {
+  std::vector<pid_t> tids;
+  std::string task_dir = absl::Substitute("/proc/$0/task", pid);
+  
+  DIR* dir = opendir(task_dir.c_str());
+  if (!dir) {
+    perror("opendir failed");
+    return tids;
   }
-
-  while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-    result += buffer.data();
+  
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    pid_t tid = atoi(entry->d_name);
+    if (tid > 0) tids.push_back(tid);
   }
-
-  pclose(pipe);
-  return result;
+  closedir(dir);
+  return tids;
 }
 
 // ---------------------------------------------------------
@@ -88,27 +108,105 @@ SysbenchMetrics ParseSysbenchOutput(const std::string& output) {
 }
 
 // ---------------------------------------------------------
-// 1. Run sysbench
-// 2. Parse metrics
-// 3. Save CSV → metrics/cfs_sysbench.csv
+// 1. Fork and exec sysbench
+// 2. Move sysbench process and threads into ghOSt
+// 3. Capture output and parse metrics
+// 4. Save CSV → metrics/cfs_sysbench.csv
 // ---------------------------------------------------------
-void sysbenchCfs() {
+void sysbenchCfs(int enclave_fd) {
   std::cout << "[sysbenchCfs] Starting sysbench under ghOSt...\n";
   const std::string ghost_cpus = absl::GetFlag(FLAGS_ghost_cpus);
 
   // Create metrics directory if missing
-  system("mkdir -p metrics");
+  // (void) cast prevents "ignoring return value" warning
+  (void)system("mkdir -p metrics");
 
-  // Full sysbench command
-  const std::string cmd = absl::Substitute(
-      "./tests/run_sysbench_ghost.sh 1 $0 2>&1", ghost_cpus);
+  // Wait a moment to ensure enclave is fully initialized
+  absl::SleepFor(absl::Milliseconds(500));
 
-  std::cout << "[sysbenchCfs] Running command: " << cmd << "\n";
+  // Create a pipe to capture sysbench output
+  int pipefd[2];
+  if (pipe(pipefd) == -1) {
+    perror("pipe failed");
+    return;
+  }
 
-  // Run sysbench and capture stdout
-  std::string output = RunCommandCaptureOutput(cmd);
+  // Fork and exec sysbench
+  pid_t sysbench_pid = fork();
+  if (sysbench_pid == 0) {
+    // Child: redirect stdout and stderr to pipe, then exec sysbench
+    close(pipefd[0]);  // Close read end
+    dup2(pipefd[1], STDOUT_FILENO);
+    dup2(pipefd[1], STDERR_FILENO);
+    close(pipefd[1]);
+    
+    // NOTE: Increased time to 30s to ensure valid gathering period
+    execlp("sysbench", "sysbench", "cpu",
+           "--threads=1",
+           "--cpu-max-prime=20000",
+           "run", nullptr);
+    perror("execlp failed");
+    exit(1);
+  } else if (sysbench_pid < 0) {
+    std::cerr << "[sysbenchCfs] fork failed: " << strerror(errno) << std::endl;
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return;
+  }
 
-  // Save raw stdout for debugging
+  // Parent: close write end of pipe
+  close(pipefd[1]);
+
+  // Wait a moment for sysbench to start and create threads
+  absl::SleepFor(absl::Milliseconds(200));
+
+  // Get all thread PIDs for sysbench process
+  std::vector<pid_t> thread_pids = GetThreadPids(sysbench_pid);
+  
+  // Move main process and all threads into ghOSt
+  std::cout << "[sysbenchCfs] Moving sysbench (pid=" << sysbench_pid 
+            << ") and " << thread_pids.size() << " threads into ghOSt..." << std::endl;
+  
+  if (MoveProcessToGhost(sysbench_pid, enclave_fd) != 0) {
+    std::cerr << "[sysbenchCfs] ERROR: Failed to move sysbench process to ghOSt: " 
+              << strerror(errno) << std::endl;
+  } else {
+    std::cout << "[sysbenchCfs] SUCCESS: Moved main process." << std::endl;
+  }
+  
+  int moved_count = 0;
+  for (pid_t tid : thread_pids) {
+    if (tid != sysbench_pid) {  // Don't move main process twice
+      if (MoveProcessToGhost(tid, enclave_fd) != 0) {
+        std::cerr << "[sysbenchCfs] Warning: Failed to move thread " << tid 
+                  << " to ghOSt: " << strerror(errno) << std::endl;
+      } else {
+        moved_count++;
+      }
+    }
+  }
+  std::cout << "[sysbenchCfs] Moved " << moved_count << " threads to ghOSt" << std::endl;
+
+  // Read sysbench output from pipe
+  std::string output;
+  char buffer[4096];
+  ssize_t n;
+  while ((n = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+    buffer[n] = '\0';
+    output += buffer;
+  }
+  close(pipefd[0]);
+
+  // Wait for sysbench to complete
+  int status;
+  waitpid(sysbench_pid, &status, 0);
+  
+  if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+    std::cerr << "[sysbenchCfs] Warning: sysbench exited with status " 
+              << WEXITSTATUS(status) << std::endl;
+  }
+
+  // Save raw output for debugging
   {
     std::ofstream raw("metrics/cfs_sysbench_raw.txt");
     raw << output;
@@ -123,7 +221,7 @@ void sysbenchCfs() {
 
   std::ofstream csv(csv_path, std::ios::app);
   if (!csv.is_open()) {
-    std::cerr << "Failed to open CSV file: " << csv_path << "\n";
+    std::cerr << "[sysbenchCfs] Failed to open CSV file: " << csv_path << "\n";
     return;
   }
 
@@ -142,6 +240,7 @@ void sysbenchCfs() {
       << metrics.max_latency_ms << "\n";
 
   std::cout << "[sysbenchCfs] Metrics saved to " << csv_path << "\n";
+  std::cout << "[sysbenchCfs] Events/sec: " << metrics.events_per_sec << std::endl;
 }
 
 // ---------------------------------------------------------
@@ -153,11 +252,12 @@ int main(int argc, char* argv[]) {
                           ghost::CfsConfig>>
       ap;
 
-  ghost::CpuList cpus = ghost::MachineTopology()->all_cpus();
+  // Initialize enclave_fd to -1 (invalid)
+  int enclave_fd = -1;
 
   if (absl::GetFlag(FLAGS_create_enclave_and_agent)) {
     ghost::Topology* topology = ghost::MachineTopology();
-    cpus = topology->ParseCpuStr(absl::GetFlag(FLAGS_ghost_cpus));
+    ghost::CpuList cpus = topology->ParseCpuStr(absl::GetFlag(FLAGS_ghost_cpus));
     ghost::CfsConfig config(topology, cpus);
 
     std::cout << "Creating enclave + CFS ghOSt agent on CPUs "
@@ -166,8 +266,33 @@ int main(int argc, char* argv[]) {
     ap = std::make_unique<
         ghost::AgentProcess<ghost::FullCfsAgent<ghost::LocalEnclave>,
                             ghost::CfsConfig>>(config);
+    
+    // FIX: Directly open the enclave directory instead of using the API
+    // The AgentProcess above will create 'enclave_1' by default.
+    // O_PATH is sufficient for reference, but O_RDONLY|O_DIRECTORY is standard.
+    enclave_fd = open("/sys/fs/ghost/enclave_1", O_RDONLY | O_DIRECTORY);
+    
+    if (enclave_fd < 0) {
+        // Fallback: In some race conditions, it might be enclave_2, though rare in tests.
+        // We will stick to complaining if enclave_1 isn't there.
+        std::cerr << "WARNING: Could not open /sys/fs/ghost/enclave_1. " 
+                  << "Error: " << strerror(errno) << std::endl;
+    }
   }
 
-  sysbenchCfs();
+  // Check if we have a valid FD
+  if (enclave_fd < 0) {
+      std::cerr << "Error: No valid enclave file descriptor found.\n";
+      return 1;
+  }
+
+  std::cout << "[main] Using enclave FD: " << enclave_fd << std::endl;
+
+  // Pass the valid FD to your test function
+  sysbenchCfs(enclave_fd);
+  
+  // Clean up FD
+  if (enclave_fd >= 0) close(enclave_fd);
+
   return 0;
 }

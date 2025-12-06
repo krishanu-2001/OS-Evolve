@@ -11,6 +11,9 @@ install-ghost-userspace:
 	cp ghost-assets/.bazelversion $(GHOST_USERSPACE_DIR)/.bazelversion
 	cp ghost-assets/.bazelrc $(GHOST_USERSPACE_DIR)/.bazelrc
 	cp ghost-assets/cfs_hol_test.cc $(GHOST_USERSPACE_DIR)/tests/cfs_hol_test.cc
+	cp ghost-assets/cfs_sysbench_test.cc $(GHOST_USERSPACE_DIR)/tests/cfs_sysbench_test.cc
+	cp ghost-assets/run_sysbench_ghost.sh $(GHOST_USERSPACE_DIR)/tests/run_sysbench_ghost.sh
+	chmod +x $(GHOST_USERSPACE_DIR)/tests/run_sysbench_ghost.sh
 	cp -r ghost-assets/test $(GHOST_USERSPACE_DIR)/schedulers/test
 	cd $(GHOST_USERSPACE_DIR) && sudo bazel build -c opt agent_cfs_test
 	cd $(GHOST_USERSPACE_DIR) && sudo bazel build -c opt cfs_hol_test

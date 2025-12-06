@@ -365,6 +365,22 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "cfs_sysbench_test",
+    srcs = [
+        "tests/cfs_sysbench_test.cc",
+    ],
+    copts = compiler_flags,
+    deps = [
+        ":base",
+        ":cfs_test_scheduler",
+        ":ghost",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 cc_test(
     name = "agent_test",
     size = "small",
