@@ -20,4 +20,7 @@ install-ghost-userspace:
 	cd $(GHOST_USERSPACE_DIR) && sudo ./bazel-bin/cfs_hol_test --create_enclave_and_agent --hol_threads=128 --hol_fast_ms=5 --hol_slow_index=5 --hol_slow_ms=150 --ghost_cpus=1-5 --hol_metrics='../results/make_run/cfs_hol.csv'
 
 clean_enclaves:
-	rm -rf $(GHOST_USERSPACE_DIR)/enclaves/
+	for i in $$(seq 1 10); do \
+		echo destroy | sudo tee $(GHOST_ENCLAVES_DIR)/enclave_$${i}/ctl >/dev/null || true; \
+	done
+	
