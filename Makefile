@@ -2,7 +2,7 @@
 # Install ghost-userspace assets
 # -------------------------------
 GHOST_USERSPACE_DIR ?= ghost-userspace
-GHOST_USERSPACE_DIR ?= 
+GHOST_ENCLAVES_DIR ?= /sys/fs/ghost
 
 install-ghost-userspace:
 	bash ghost-assets/install-ghost-userspace.sh $(GHOST_USERSPACE_DIR)
