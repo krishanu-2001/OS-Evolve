@@ -135,4 +135,20 @@ echo destroy > /sys/fs/ghost/enclave_1/ctl
 sudo chown -R saikri /mydata
 
 
+==============================================================================
+#### Install Perf ####
+git clone https://git.kernel.org/pub/scm/linux/kernel/git/perf/perf-tools-next.git/
+cd perf-tools-next
 
+git checkout f40ddce88593482919761f74910f42f4b84c004b
+
+
+cd tools/perf
+
+sudo apt install -y     build-essential     flex bison     libelf-dev libdw-dev     libslang2-dev     libperl-dev     python3-dev python3-setuptools     binutils-dev libiberty-dev     liblzma-dev     libzstd-dev     libbabeltrace-dev libbabeltrace-ctf-dev     libnuma-dev     pkg-config gettext
+
+make -j$(nproc)
+
+sudo ln -s /mydata/perf-tools-next/tools/perf /usr/local/bin/perf
+
+echo PATH = $PATH:/usr/local/bin/perf

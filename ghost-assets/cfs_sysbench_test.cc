@@ -73,39 +73,95 @@ struct SysbenchMetrics {
   double total_time_sec = 0;
   double events_per_sec = 0;
   double total_events = 0;
+
   double min_latency_ms = 0;
   double avg_latency_ms = 0;
   double max_latency_ms = 0;
+
+  std::string thread_fairness_events = "";
+  std::string thread_fairness_execution_time = "";
 };
 
 SysbenchMetrics ParseSysbenchOutput(const std::string& output) {
-  SysbenchMetrics m;
-  std::istringstream iss(output);
-  std::string line;
+    SysbenchMetrics m{};
+    std::istringstream iss(output);
+    std::string line;
 
-  while (std::getline(iss, line)) {
-    if (line.find("total time:") != std::string::npos) {
-      sscanf(line.c_str(), "    total time: %lf", &m.total_time_sec);
+    // Regex patterns
+    const std::regex total_time_re(R"(total time:\s*([0-9]*\.?[0-9]+))");
+    const std::regex events_per_sec_re(R"(events per second:\s*([0-9]*\.?[0-9]+))");
+    const std::regex total_events_re(R"(total number of events:\s*([0-9]*\.?[0-9]+))");
+
+    const std::regex min_lat_re(R"(min:\s*([0-9]*\.?[0-9]+))");
+    const std::regex avg_lat_re(R"(avg:\s*([0-9]*\.?[0-9]+))");
+    const std::regex max_lat_re(R"(max:\s*([0-9]*\.?[0-9]+))");
+
+    // Thread fairness: capture the whole "X/Y" token
+    const std::regex fairness_events_re(R"(events\s*\(avg\/stddev\):\s*([0-9]+\.[0-9]+\/[0-9]+\.[0-9]+))");
+    const std::regex fairness_exec_re(
+        R"(execution time\s*\(avg\/stddev\):\s*([0-9]+\.[0-9]+\/[0-9]+\.[0-9]+))");
+
+    std::smatch match;
+
+    while (std::getline(iss, line)) {
+        if (std::regex_search(line, match, total_time_re)) {
+            m.total_time_sec = std::stod(match[1]);
+        } else if (std::regex_search(line, match, events_per_sec_re)) {
+            m.events_per_sec = std::stod(match[1]);
+        } else if (std::regex_search(line, match, total_events_re)) {
+            m.total_events = std::stod(match[1]);
+        } else if (std::regex_search(line, match, min_lat_re)) {
+            m.min_latency_ms = std::stod(match[1]);
+        } else if (std::regex_search(line, match, avg_lat_re)) {
+            m.avg_latency_ms = std::stod(match[1]);
+        } else if (std::regex_search(line, match, max_lat_re)) {
+            m.max_latency_ms = std::stod(match[1]);
+        } else if (std::regex_search(line, match, fairness_events_re)) {
+            m.thread_fairness_events = match[1];
+        } else if (std::regex_search(line, match, fairness_exec_re)) {
+            m.thread_fairness_execution_time = match[1];
+        }
     }
-    if (line.find("events per second:") != std::string::npos) {
-      sscanf(line.c_str(), "    events per second: %lf", &m.events_per_sec);
-    }
-    if (line.find("total number of events:") != std::string::npos) {
-      sscanf(line.c_str(), "    total number of events: %lf", &m.total_events);
-    }
-    if (line.find("min:") == 0) {
-      sscanf(line.c_str(), "min: %lf", &m.min_latency_ms);
-    }
-    if (line.find("avg:") == 0) {
-      sscanf(line.c_str(), "avg: %lf", &m.avg_latency_ms);
-    }
-    if (line.find("max:") == 0) {
-      sscanf(line.c_str(), "max: %lf", &m.max_latency_ms);
-    }
+
+    return m;
+}
+
+void saveSysbenchMetricsCsv(const SysbenchMetrics& metrics) {
+  const std::string csv_path = "metrics/cfs_sysbench.csv";
+
+  bool exists = (access(csv_path.c_str(), F_OK) == 0);
+
+  std::ofstream csv(csv_path, std::ios::app);
+  if (!csv.is_open()) {
+    std::cerr << "Failed to open CSV file: " << csv_path << "\n";
+    return;
   }
 
-  return m;
+  // Write header only if file does not exist
+  if (!exists) {
+    csv << "total_time_sec,"
+           "events_per_sec,"
+           "total_events,"
+           "min_latency_ms,"
+           "avg_latency_ms,"
+           "max_latency_ms,"
+           "thread_fairness_events,"
+           "thread_fairness_execution_time\n";
+  }
+
+  // Write row
+  csv << metrics.total_time_sec << ","
+      << metrics.events_per_sec << ","
+      << metrics.total_events << ","
+      << metrics.min_latency_ms << ","
+      << metrics.avg_latency_ms << ","
+      << metrics.max_latency_ms << ","
+      << metrics.thread_fairness_events << ","
+      << metrics.thread_fairness_execution_time << "\n";
+
+  std::cout << "[sysbenchCfs] Metrics saved to " << csv_path << "\n";
 }
+
 
 // ---------------------------------------------------------
 // 1. Fork and exec sysbench
