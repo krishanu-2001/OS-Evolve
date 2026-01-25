@@ -1,0 +1,73 @@
+
+==============================================================================
+#### Installing ghost-kernel #####
+git clone https://github.com/krishanu-2001/ghost-installer
+make and follow the terminal commands
+You need ubuntu v20 i.e. an older version for this
+
+==============================================================================
+#### Loading the right grub #####
+sudo apt install kexec-tools
+sudo kexec -l /boot/vmlinuz-5.11.0+ \
+    --initrd=/boot/initrd.img-5.11.0+ \
+    --reuse-cmdline
+sudo systemctl kexec
+
+uname -r 
+## should show 5.11.0+
+
+
+==============================================================================
+#### Setting up Bazelisk* Not Bazel ####
+
+wget -c https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64
+#Please change the directory names etc. where ever required.
+chmod +x bazelisk-linux-amd64
+sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
+
+#To verify your Bazel installation, run:
+bazel version
+
+- note we have a bazel.rc file that downloads the right bazel version for the project.
+
+==============================================================================
+#### Setting up Userspace ####
+================================================
+**** Warning: Ignore this and see makefile for steps ****
+
+sudo bazel build -c opt agent_cfs
+sudo bazel build -c opt simple_exp
+sudo ./bazel-bin/agent_cfs --ghost_cpus 2-3
+
+# running simple_cfs experiment
+sudo ./bazel-bin/simple_cfs --create_enclave_and_agent --ghost_cpus=1-5
+
+# running head-of-line experiment
+sudo ./bazel-bin/cfs_hol_test --create_enclave_and_agent --ghost_cpus=1-5 \
+--hol_threads=32 --hol_slow_index=0 --hol_slow_ms=150 --hol_fast_ms=5
+
+
+
+==============================================================================
+#### cleanup need to clean up enclaves as we do more experiments ####
+**** IGNORE: script in makefile ****
+
+ls /sys/fs/ghost/
+echo destroy > /sys/fs/ghost/enclave_1/ctl
+
+
+==============================================================================
+#### Mounted filespace ####
+sudo chown -R saikri /mydata
+
+
+==============================================================================
+#### Install Perf #### (funnily donot apt install, version does not exist in apt system)
+git clone https://git.kernel.org/pub/scm/linux/kernel/git/perf/perf-tools-next.git/
+cd perf-tools-next
+git checkout f40ddce88593482919761f74910f42f4b84c004b
+cd tools/perf
+sudo apt install -y     build-essential     flex bison     libelf-dev libdw-dev     libslang2-dev     libperl-dev     python3-dev python3-setuptools     binutils-dev libiberty-dev     liblzma-dev     libzstd-dev     libbabeltrace-dev libbabeltrace-ctf-dev     libnuma-dev     pkg-config gettext
+make -j$(nproc)
+sudo ln -s /mydata/perf-tools-next/tools/perf /usr/local/bin/perf
+echo PATH = $PATH:/usr/local/bin/perf

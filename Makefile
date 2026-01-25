@@ -4,6 +4,9 @@
 GHOST_USERSPACE_DIR ?= ghost-userspace
 GHOST_ENCLAVES_DIR ?= /sys/fs/ghost
 
+# this command will install the ghost-userspace assets and set up the bazel version.
+# run this to setup properly for further experiments.
+# ghost-assets contains assets for setup. Be sure to change the BUILD file if you're adding new tests.
 install-ghost-userspace:
 	bash ghost-assets/install-ghost-userspace.sh $(GHOST_USERSPACE_DIR)
 	cp ghost-assets/BUILD $(GHOST_USERSPACE_DIR)/BUILD 
@@ -41,3 +44,9 @@ clean_enclaves:
 		echo destroy | sudo tee $(GHOST_ENCLAVES_DIR)/enclave_$${i}/ctl >/dev/null || true; \
 	done
 	
+
+# this command will run the shinka experiment for 1 generation and save the results in results_cfs_scheduler directory.
+# instead of calling shinka scheduler experiement, we use the run_evo.py script to run the experiment.
+shinka_experiment:
+	cd examples/scheduler
+	python run_evo.py --num_generations=1 --results_dir=results_cfs_scheduler &> /tmp/shinka_experiment.log &	
