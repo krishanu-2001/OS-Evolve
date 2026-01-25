@@ -1,0 +1,240 @@
+# EVOLVE-BLOCK-START
+"""Adaptive hybrid circle packing optimizer for n=26 with enhanced refinement"""
+
+import numpy as np
+from typing import Callable, List, Tuple
+
+class CirclePacker2:
+    def __init__(
+        self,
+        n: int = 26,
+        init_methods: List[Callable[[], np.ndarray]] = None,
+        max_sweeps: int = 30,
+        tol: float = 1e-7,
+        refine_iters: int = 1500,
+        T0: float = 1e-2,
+        alpha: float = 0.995,
+        sigma_base: float = 0.015,
+        sigma_multi: float = 0.03,
+        stagnation_limit: int = 200,
+        force_iters: int = 80,
+        force_lr: float = 0.01,
+    ):
+        self.n = n
+        self.max_sweeps = max_sweeps
+        self.tol = tol
+        self.refine_iters = refine_iters
+        self.T0 = T0
+        self.alpha = alpha
+        self.sigma_base = sigma_base
+        self.sigma_multi = sigma_multi
+        self.stagnation_limit = stagnation_limit
+        self.force_iters = force_iters
+        self.force_lr = force_lr
+
+        if init_methods is None:
+            # Dynamically generate plausible hex layouts for n=26
+            self.init_methods = [self._radial_layout]
+            for rows in self._generate_hex_row_combinations(self.n):
+                self.init_methods.append(self._hex_layout(rows))
+        else:
+            self.init_methods = init_methods
+
+    def optimize(self) -> Tuple[np.ndarray, np.ndarray]:
+        best_score = -np.inf
+        best_c = None
+        best_r = None
+        for init in self.init_methods:
+            centers = init()
+            centers = np.clip(centers, 0.0, 1.0)
+            radii = self._compute_radii(centers)
+            c_opt, r_opt = self._refine(centers, radii)
+            score = r_opt.sum()
+            if score > best_score:
+                best_score = score
+                best_c, best_r = c_opt.copy(), r_opt.copy()
+        return best_c, best_r
+
+    def _compute_radii(self, centers: np.ndarray) -> np.ndarray:
+        # initialize by border distance
+        border = np.minimum.reduce([
+            centers[:,0], centers[:,1],
+            1 - centers[:,0], 1 - centers[:,1]
+        ])
+        radii = border.copy()
+        for _ in range(self.max_sweeps):
+            diff = centers[:, None, :] - centers[None, :, :]
+            D = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = radii[:, None] + radii[None, :]
+            scale = np.minimum(1.0, D / sumr)
+            min_scale = scale.min(axis=1)
+            new_r = radii * min_scale
+            if np.max(np.abs(new_r - radii)) < self.tol:
+                break
+            radii = new_r
+        return radii
+
+    def _refine(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        best_c = centers.copy()
+        best_r = radii.copy()
+        best_score = radii.sum()
+
+        curr_c = best_c.copy()
+        curr_r = best_r.copy()
+        curr_score = best_score
+
+        T = self.T0
+        stagnation = 0
+
+        for it in range(self.refine_iters):
+            # adapt perturbation parameters
+            if stagnation > self.stagnation_limit:
+                p_multi = 0.5
+                sigma = self.sigma_multi
+            else:
+                p_multi = 0.2
+                sigma = self.sigma_base
+
+            # choose indices to perturb
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+
+            T *= self.alpha
+
+        # Post-annealing force-based refinement
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+
+        return best_c, best_r
+
+    def _radial_layout(self) -> np.ndarray:
+        c = np.zeros((self.n, 2))
+        c[0] = [0.5, 0.5]
+        r1, r2 = 0.28, 0.65
+        for i in range(8):
+            θ = 2*np.pi*i/8 + np.pi/16
+            c[i+1] = [0.5 + r1*np.cos(θ), 0.5 + r1*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13 + np.pi/13
+            c[i+9] = [0.5 + r2*np.cos(θ), 0.5 + r2*np.sin(θ)]
+        cm = 0.1
+        corners = [(cm,cm),(1-cm,cm),(cm,1-cm),(1-cm,1-cm)]
+        for idx, p in enumerate(corners, start=22):
+            c[idx] = p
+        return c
+
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = 0.1
+            max_row = max(rows)
+            dx = (1-2*margin)/(max_row-1) if max_row > 1 else 1-2*margin
+            dy = dx*np.sqrt(3)/2
+            total_h = dy*(len(rows)-1)
+            y0 = (1-total_h)/2
+            pts = []
+            for i, cnt in enumerate(rows):
+                y = y0 + i*dy
+                row_w = dx*(cnt-1) if cnt > 1 else 0
+                x0 = (1-row_w)/2
+                xs = x0 + np.arange(cnt)*dx if cnt > 1 else np.array([x0])
+                for x in xs:
+                    pts.append((x, y))
+            arr = np.array(pts)
+            if len(arr) > self.n:
+                return arr[:self.n]
+            elif len(arr) < self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr, pad])
+            return arr
+        return layout
+
+    def _generate_hex_row_combinations(self, n: int) -> List[List[int]]:
+        """
+        Generate plausible hexagonal row count combinations that sum to n.
+        Only include layouts with 4-6 rows, row counts differ by at most 2,
+        and max row count is at least 4.
+        """
+        results = []
+        for num_rows in range(4, 7):
+            # Try all integer partitions of n into num_rows parts
+            def helper(sofar, left, rows_left):
+                if rows_left == 1:
+                    if left >= 1:
+                        candidate = sofar + [left]
+                        if max(candidate) - min(candidate) <= 2 and max(candidate) >= 4:
+                            results.append(candidate)
+                    return
+                for v in range(1, left - rows_left + 2):
+                    helper(sofar + [v], left - v, rows_left - 1)
+            helper([], n, num_rows)
+        # Remove duplicates and sort by "hex-likeness" (max-min, then max row)
+        results = list({tuple(sorted(r)): r for r in results}.values())
+        results.sort(key=lambda r: (max(r)-min(r), -max(r)))
+        return results
+
+    def _force_refine(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = self._compute_radii(c)
+            forces = np.zeros_like(c)
+            diff = c[:,None,:] - c[None,:,:]
+            dist = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = r[:,None] + r[None,:]
+            overlap = sumr - dist
+            mask = overlap > 0
+            dirs = np.zeros_like(diff)
+            nz = dist > 0
+            dirs[nz] = diff[nz]/dist[nz][...,None]
+            f = overlap[...,None] * dirs
+            forces -= np.sum(np.where(mask[...,None], f, 0), axis=1)
+            forces += np.sum(np.where(mask[...,None], f, 0), axis=0)
+            # border forces
+            left = np.where(c[:,0] < r, (r - c[:,0]), 0)
+            right = np.where((1-c[:,0]) < r, (r - (1-c[:,0])), 0)
+            down = np.where(c[:,1] < r, (r - c[:,1]), 0)
+            up = np.where((1-c[:,1]) < r, (r - (1-c[:,1])), 0)
+            forces[:,0] += left - right
+            forces[:,1] += down - up
+            c += self.force_lr * forces
+            c = np.clip(c, 0.0, 1.0)
+        r_final = self._compute_radii(c)
+        return c, r_final
+
+def construct_packing() -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Construct a 26‐circle packing in a unit square.
+    Returns centers (26×2 array) and radii (length 26 array).
+    """
+    packer = CirclePacker2()
+    return packer.optimize()
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

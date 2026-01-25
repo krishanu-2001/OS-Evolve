@@ -1,0 +1,26 @@
+<NAME>adaptive_reheating</NAME>
+
+<DESCRIPTION>
+Implement periodic reheating of the temperature schedule in simulated annealing to escape plateaus. We introduce a reheat_interval as max(1000, iters//10) and reset T to T0 every reheat_interval iterations, allowing the algorithm to explore beyond local minima.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    T = T0
+    decay = (Tend/T0)**(1.0/iters)
+=======
+    T = T0
+    decay = (Tend/T0)**(1.0/iters)
+    reheat_interval = max(1000, iters // 10)
+>>>>>>> REPLACE
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+        T *= decay
+=======
+        T *= decay
+        if (it+1) % reheat_interval == 0:
+            T = T0
+>>>>>>> REPLACE
+</DIFF>

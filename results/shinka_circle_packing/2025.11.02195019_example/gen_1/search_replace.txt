@@ -1,0 +1,35 @@
+<NAME>
+variable_sized_circles_centered
+</NAME>
+
+<DESCRIPTION>
+Introduce a pattern where larger circles are placed at the center and smaller circles are arranged towards the edges, optimizing space utilization and potentially increasing the total sum of radii. This approach leverages the intuition that larger circles in the center allow for better overall packing density, while smaller circles around the periphery fill gaps efficiently. To implement this, define a set of radii based on their distance from the center, with larger radii at the center and decreasing outward, then position circles accordingly in a radial pattern. This modification aims to improve the packing density and the combined score.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # Place 8 circles around it in a ring
+    for i in range(8):
+        angle = 2 * np.pi * i / 8
+        centers[i + 1] = [0.5 + 0.3 * np.cos(angle), 0.5 + 0.3 * np.sin(angle)]
+
+    # Place 16 more circles in an outer ring
+    for i in range(16):
+        angle = 2 * np.pi * i / 16
+        centers[i + 9] = [0.5 + 0.7 * np.cos(angle), 0.5 + 0.7 * np.sin(angle)]
+=======
+    # Place 8 circles around in a ring with decreasing radii outward
+    radii_pattern = np.linspace(0.05, 0.02, 8)  # Larger in center, smaller outward
+    for i in range(8):
+        angle = 2 * np.pi * i / 8
+        radius_offset = 0.3 + 0.2 * (i // 4)  # Slightly larger radius for outer ring
+        centers[i + 1] = [0.5 + radius_offset * np.cos(angle), 0.5 + radius_offset * np.sin(angle)]
+        radii[i + 1] = radii_pattern[i]
+
+    # Place 16 circles in an outer ring with smaller radii
+    for i in range(16):
+        angle = 2 * np.pi * i / 16
+        radius_offset = 0.7 + 0.2 * (i // 8)  # Outer ring
+        centers[i + 9] = [0.5 + radius_offset * np.cos(angle), 0.5 + radius_offset * np.sin(angle)]
+        radii[i + 9] = 0.02  # Small fixed radius for outer circles
+>>>>>>> REPLACE

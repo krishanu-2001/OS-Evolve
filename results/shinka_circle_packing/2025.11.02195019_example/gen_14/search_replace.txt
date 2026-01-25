@@ -1,0 +1,76 @@
+<NAME>
+iterative_radii_sweeps
+</NAME>
+
+<DESCRIPTION>
+Enhance compute_max_radii by performing multiple sweeps of border and pairwise constraints until convergence. This iterative tightening ensures each circle reaches its true maximal radius under all constraints, improving packing density.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def compute_max_radii(centers):
+    """
+    Compute the maximum possible radii for each circle position
+    such that they don't overlap and stay within the unit square.
+
+    Args:
+        centers: np.array of shape (n, 2) with (x, y) coordinates
+
+    Returns:
+        np.array of shape (n) with radius of each circle
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+
+    # First, limit by distance to square borders
+    for i in range(n):
+        x, y = centers[i]
+        # Distance to borders
+        radii[i] = min(x, y, 1 - x, 1 - y)
+
+    # Then, limit by distance to other circles
+    # Each pair of circles with centers at distance d can have
+    # sum of radii at most d to avoid overlap
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+
+            # If current radii would cause overlap
+            if radii[i] + radii[j] > dist:
+                # Scale both radii proportionally
+                scale = dist / (radii[i] + radii[j])
+                radii[i] *= scale
+                radii[j] *= scale
+
+    return radii
+=======
+# iterative sweeps to maximize radii under constraints
+def compute_max_radii(centers, max_sweeps=10, tol=1e-6):
+    """
+    Compute the maximum possible radii for each circle position
+    such that they don't overlap and stay within the unit square,
+    using iterative tightening until convergence.
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+    for sweep in range(max_sweeps):
+        prev_radii = radii.copy()
+        # Border constraints
+        for i in range(n):
+            x, y = centers[i]
+            radii[i] = min(prev_radii[i], x, y, 1 - x, 1 - y)
+        # Pairwise non-overlap constraints
+        for i in range(n):
+            for j in range(i + 1, n):
+                dx, dy = centers[i] - centers[j]
+                dist = np.hypot(dx, dy)
+                if dist > 0 and radii[i] + radii[j] > dist:
+                    scale = dist / (radii[i] + radii[j])
+                    radii[i] *= scale
+                    radii[j] *= scale
+        # Check convergence
+        if np.max(np.abs(radii - prev_radii)) < tol:
+            break
+    return radii
+>>>>>>> REPLACE
+</DIFF>

@@ -1,0 +1,184 @@
+--- a/original.py
++++ b/original.py
+@@ -1,94 +1,120 @@
+ # EVOLVE-BLOCK-START
+-"""Constructor-based circle packing for n=26 circles"""
++"""Repulsive-gradient-based circle packing for n=26 circles"""
+ 
+ import numpy as np
+ 
+-
+ def construct_packing():
+     """
+-    Construct a specific arrangement of 26 circles in a unit square
+-    that attempts to maximize the sum of their radii.
++    Optimize the positions and radii of 26 circles in a unit square
++    to maximize the sum of radii using repulsive-force-based gradient ascent.
++    Returns:
++        centers: np.array (26,2)
++        radii: np.array (26,)
++    """
++    n = 26
++    np.random.seed(0)
++    centers = np.random.rand(n, 2) * 0.8 + 0.1  # Initial: not too close to border
++    radii = np.full(n, 0.04)  # Reasonable initial guess
+ 
+-    Returns:
+-        Tuple of (centers, radii, sum_of_radii)
+-        centers: np.array of shape (26, 2) with (x, y) coordinates
+-        radii: np.array of shape (26) with radius of each circle
+-        sum_of_radii: Sum of all radii
+-    """
+-    # Initialize arrays for 26 circles
+-    n = 26
+-    centers = np.zeros((n, 2))
++    lr_c = 0.015  # Learning rate for centers
++    lr_r = 0.01   # Learning rate for radii
++    n_steps = 1200
++    min_r, max_r = 0.01, 0.5
+ 
+-    # Place circles in a structured pattern
+-    # This is a simple pattern - evolution will improve this
++    for step in range(n_steps):
++        grad_c = np.zeros_like(centers)
++        grad_r = np.ones_like(radii)  # reward growing each radius
+ 
+-    # First, place a large circle in the center
+-    centers[0] = [0.5, 0.5]
++        # Repulsive force between all pairs (overlaps -> penalize, otherwise weak)
++        for i in range(n):
++            for j in range(i+1, n):
++                d = centers[i] - centers[j]
++                dist = np.linalg.norm(d)
++                min_dist = radii[i] + radii[j] + 1e-7
++                # If overlaps, strong penalty; otherwise, weak (almost none)
++                if dist < min_dist:
++                    # Overlap, push away and penalize big radii
++                    overlap = min_dist - dist
++                    # d direction, if two centers coincide, random
++                    if dist < 1e-8:
++                        direction = np.random.randn(2)
++                        direction /= (np.linalg.norm(direction) + 1e-10)
++                    else:
++                        direction = d/dist
++                    force = 10 * overlap
++                    grad_c[i] +=  force * direction
++                    grad_c[j] -=  force * direction
++                    grad_r[i]   -= 10 * overlap
++                    grad_r[j]   -= 10 * overlap
+ 
+-    # Place 8 circles around it in a ring
+-    for i in range(8):
+-        angle = 2 * np.pi * i / 8
+-        centers[i + 1] = [0.5 + 0.3 * np.cos(angle), 0.5 + 0.3 * np.sin(angle)]
++        # Boundary penalty: project centers out and shrink radii on overflow
++        for i in range(n):
++            x, y, r = centers[i,0], centers[i,1], radii[i]
++            # Left, right, bottom, top
++            over_left = max(0, r - x)
++            over_right = max(0, r - (1 - x))
++            over_bottom = max(0, r - y)
++            over_top = max(0, r - (1 - y))
++            # Push inside
++            grad_c[i,0] +=  15 * over_left - 15 * over_right
++            grad_c[i,1] +=  15 * over_bottom - 15 * over_top
++            grad_r[i]   -= 10 * (over_left + over_right + over_bottom + over_top)
+ 
+-    # Place 16 more circles in an outer ring
+-    for i in range(16):
+-        angle = 2 * np.pi * i / 16
+-        centers[i + 9] = [0.5 + 0.7 * np.cos(angle), 0.5 + 0.7 * np.sin(angle)]
++        # Apply update (gradient * learning rate)
++        centers += lr_c * grad_c
++        radii   += lr_r * grad_r
+ 
+-    # Additional positioning adjustment to make sure all circles
+-    # are inside the square and don't overlap
+-    # Clip to ensure everything is inside the unit square
+-    centers = np.clip(centers, 0.01, 0.99)
++        # Project radii to [min_r, max_r], centers to [0, 1]
++        radii = np.clip(radii, min_r, max_r)
++        centers = np.clip(centers, 0.0, 1.0)
+ 
+-    # Compute maximum valid radii for this configuration
+-    radii = compute_max_radii(centers)
++    # Final projection: make sure no overlaps & within box
++    radii = compute_max_radii_project(centers, radii)
+     return centers, radii
+ 
+-
+-def compute_max_radii(centers):
++def compute_max_radii_project(centers, radii_in):
+     """
+-    Compute the maximum possible radii for each circle position
+-    such that they don't overlap and stay within the unit square.
+-
++    Final projection: for each circle, shrink radii to avoid overlaps and boundary violations.
+     Args:
+-        centers: np.array of shape (n, 2) with (x, y) coordinates
+-
++        centers: (n,2)
++        radii_in: (n,)
+     Returns:
+-        np.array of shape (n) with radius of each circle
++        radii: (n,)
+     """
+-    n = centers.shape[0]
+-    radii = np.ones(n)
+-
+-    # First, limit by distance to square borders
++    n = len(radii_in)
++    radii = np.copy(radii_in)
++    # Border constraint
+     for i in range(n):
+         x, y = centers[i]
+-        # Distance to borders
+-        radii[i] = min(x, y, 1 - x, 1 - y)
+-
+-    # Then, limit by distance to other circles
+-    # Each pair of circles with centers at distance d can have
+-    # sum of radii at most d to avoid overlap
+-    for i in range(n):
+-        for j in range(i + 1, n):
+-            dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
+-
+-            # If current radii would cause overlap
+-            if radii[i] + radii[j] > dist:
+-                # Scale both radii proportionally
+-                scale = dist / (radii[i] + radii[j])
+-                radii[i] *= scale
+-                radii[j] *= scale
+-
++        radii[i] = min(radii[i], x, 1-x, y, 1-y)
++    # Pairwise
++    # Do this iteratively so all pairs are checked until stable
++    for _ in range(5):
++        for i in range(n):
++            for j in range(i+1, n):
++                d = np.linalg.norm(centers[i] - centers[j])
++                if d < radii[i] + radii[j]:
++                    # Shrink both to "touch"
++                    excess = (radii[i] + radii[j] - d) / 2.0 + 1e-8
++                    if radii[i] >= radii[j]:
++                        radii[i] -= excess
++                    else:
++                        radii[j] -= excess
++                    radii[i] = max(radii[i], 0.005)
++                    radii[j] = max(radii[j], 0.005)
++        # border again in each loop
++        for i in range(n):
++            x, y = centers[i]
++            radii[i] = min(radii[i], x, 1-x, y, 1-y)
+     return radii
+-
+ 
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

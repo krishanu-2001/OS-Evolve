@@ -1,0 +1,57 @@
+<NAME>
+adaptive_relaxation
+</NAME>
+<DESCRIPTION>
+Within the existing EVOLVE-BLOCK region, replace the fixed iteration loop in the `construct_packing` function with an adaptive relaxation that continues until the maximum change in radii drops below a threshold or a maximum number of iterations is reached. This improves convergence and packing density, potentially increasing the overall score.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    # Final: maximize radii with strict border and pairwise constraints
+    radii = compute_pairwise_max_radii(centers)
+    return centers, radii
+=======
+    # Final: maximize radii with strict border and pairwise constraints
+    radii = compute_pairwise_max_radii(centers)
+    return centers, radii
+
+def compute_pairwise_max_radii(centers):
+    """
+    Compute maximal radii for each center with iterative border+pairwise constraints.
+    """
+    n = centers.shape[0]
+    radii = np.ones(n)
+    # Border constraints
+    for i in range(n):
+        x, y = centers[i]
+        radii[i] = min(x, y, 1 - x, 1 - y)
+    # Iterative reduction with adaptive stopping
+    max_iter = 200
+    tol = 1e-8
+    for _ in range(max_iter):
+        max_delta = 0
+        for i in range(n):
+            for j in range(i + 1, n):
+                dist = np.linalg.norm(centers[i] - centers[j])
+                if radii[i] + radii[j] > dist:
+                    excess = radii[i] + radii[j] - dist
+                    share = 0.5 * excess
+                    old_ri, old_rj = radii[i], radii[j]
+                    radii[i] -= share
+                    radii[j] -= share
+                    radii[i] = max(radii[i], 1e-4)
+                    radii[j] = max(radii[j], 1e-4)
+                    delta_i = abs(radii[i] - old_ri)
+                    delta_j = abs(radii[j] - old_rj)
+                    max_delta = max(max_delta, delta_i, delta_j)
+        # Enforce border constraints again
+        for i in range(n):
+            x, y = centers[i]
+            border_limit = min(x, y, 1 - x, 1 - y)
+            if radii[i] > border_limit:
+                delta_border = radii[i] - border_limit
+                radii[i] = border_limit
+                max_delta = max(max_delta, delta_border)
+        if max_delta < tol:
+            break
+    return radii
+>>>>>>> REPLACE

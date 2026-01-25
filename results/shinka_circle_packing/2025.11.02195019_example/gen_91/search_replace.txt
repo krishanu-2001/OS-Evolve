@@ -1,0 +1,100 @@
+<NAME>
+adaptive_annealing_with_cluster_moves
+</NAME>
+
+<DESCRIPTION>
+Introduce periodic multi-circle cluster moves in the simulated annealing refinement phase.
+This allows simultaneous small adjustments to clusters of nearby circles, helping escape local minima that single-circle moves cannot.
+The cluster moves are applied every fixed number of iterations, with a radius-based neighbor selection, enhancing the exploration capability of the optimizer.
+This builds on the current adaptive annealing but adds a structured multi-circle perturbation mechanism to improve packing quality.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _refine(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        best_c, best_r = centers.copy(), radii.copy()
+        best_score = best_r.sum()
+        curr_c, curr_r, curr_score = best_c.copy(), best_r.copy(), best_score
+        T = self.T0
+        stagn = 0
+        for _ in range(self.refine_iters):
+            # adapt perturbation
+            if stagn > self.stagnation_limit:
+                sigma, p_multi = self.sigma_multi, 0.5
+            else:
+                sigma, p_multi = self.sigma_base, 0.2
+
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx),2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE/T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagn = 0
+                else:
+                    stagn += 1
+            else:
+                stagn += 1
+            T *= self.alpha
+=======
+    def _refine(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        best_c, best_r = centers.copy(), radii.copy()
+        best_score = best_r.sum()
+        curr_c, curr_r, curr_score = best_c.copy(), best_r.copy(), best_score
+        T = self.T0
+        stagn = 0
+        for it in range(self.refine_iters):
+            # adapt perturbation parameters
+            if stagn > self.stagnation_limit:
+                sigma, p_multi = self.sigma_multi, 0.5
+            else:
+                sigma, p_multi = self.sigma_base, 0.2
+
+            # Every 50 iterations, perform a cluster move
+            if it % 50 == 0:
+                # pick a random circle
+                center_idx = np.random.randint(self.n)
+                c_new = curr_c.copy()
+                # find neighbors within radius 0.15
+                diff = c_new - c_new[center_idx]
+                dist = np.linalg.norm(diff, axis=1)
+                neighbors = np.where(dist < 0.15)[0]
+                # limit cluster size to max 4
+                if len(neighbors) > 4:
+                    neighbors = np.random.choice(neighbors, size=4, replace=False)
+                # apply small random displacement to cluster
+                delta = np.random.randn(2) * sigma
+                c_new[neighbors] += delta
+                c_new = np.clip(c_new, 0.0, 1.0)
+            else:
+                if np.random.rand() < p_multi:
+                    idx = np.random.choice(self.n, size=3, replace=False)
+                else:
+                    idx = [np.random.randint(self.n)]
+                c_new = curr_c.copy()
+                c_new[idx] += np.random.randn(len(idx),2) * sigma
+                c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE/T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagn = 0
+                else:
+                    stagn += 1
+            else:
+                stagn += 1
+            T *= self.alpha
+>>>>>>> REPLACE

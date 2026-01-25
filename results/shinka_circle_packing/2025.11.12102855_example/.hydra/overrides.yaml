@@ -1,0 +1,3 @@
+- variant@_global_=circle_packing_example
+- evo_config.llm_models=[Qwen/Qwen2.5-7B-Instruct]
+- evo_config.meta_llm_models=[Qwen/Qwen2.5-3B-Instruct]

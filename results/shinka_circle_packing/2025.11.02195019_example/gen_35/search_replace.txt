@@ -1,0 +1,114 @@
+<NAME>
+hybrid_hex_edge_initialization
+</NAME>
+
+<DESCRIPTION>
+The current initialization places circles in a central ring and an outer ring, which is not optimal for maximizing the sum of radii for n=26. Literature and strong previous programs suggest that a hybrid approach—using a central hexagonal block, strategic placement along edges and corners, and a few points in the interior—yields better packings. This change replaces the current initialization with a hybrid hexagonal/edge/corner pattern, inspired by the best-known approaches, while keeping the robust iterative radii maximization routine. This should provide a better starting configuration for the iterative radii maximization, potentially improving the combined score.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def construct_packing():
+    """
+    Construct a specific arrangement of 26 circles in a unit square
+    that attempts to maximize the sum of their radii.
+
+    Returns:
+        Tuple of (centers, radii, sum_of_radii)
+        centers: np.array of shape (26, 2) with (x, y) coordinates
+        radii: np.array of shape (26) with radius of each circle
+        sum_of_radii: Sum of all radii
+    """
+    # Initialize arrays for 26 circles
+    n = 26
+    centers = np.zeros((n, 2))
+
+    # Place circles in a structured pattern
+    # This is a simple pattern - evolution will improve this
+
+    # First, place a large circle in the center
+    centers[0] = [0.5, 0.5]
+
+    # Place 8 circles around it in a ring
+    for i in range(8):
+        angle = 2 * np.pi * i / 8
+        centers[i + 1] = [0.5 + 0.3 * np.cos(angle), 0.5 + 0.3 * np.sin(angle)]
+
+    # Place 16 more circles in an outer ring
+    for i in range(16):
+        angle = 2 * np.pi * i / 16
+        centers[i + 9] = [0.5 + 0.7 * np.cos(angle), 0.5 + 0.7 * np.sin(angle)]
+
+    # Additional positioning adjustment to make sure all circles
+    # are inside the square and don't overlap
+    # Clip to ensure everything is inside the unit square
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # Compute maximum valid radii for this configuration
+    radii = compute_max_radii(centers)
+    return centers, radii
+=======
+def construct_packing():
+    """
+    Construct a hybrid arrangement of 26 circles in a unit square,
+    using a hexagonal block, edge/corner, and inner placements.
+    Returns:
+        centers: np.array (26,2)
+        radii: np.array (26,)
+    """
+    n = 26
+    centers = np.zeros((n, 2))
+
+    # 1. Central hexagonal block (4x3 grid, offset rows)
+    hex_rows = 4
+    hex_cols = 3
+    dx = 0.17
+    dy = dx * np.sqrt(3) / 2
+    hex_block = []
+    base_x = 0.28
+    base_y = 0.28
+    for row in range(hex_rows):
+        y = base_y + row * dy
+        for col in range(hex_cols):
+            x = base_x + col * dx + (row % 2) * (dx / 2)
+            if 0.08 < x < 0.92 and 0.08 < y < 0.92:
+                hex_block.append((x, y))
+    # Use up to 10 centers in the hex block
+    hex_block = hex_block[:10]
+    core_n = len(hex_block)
+    centers[:core_n] = np.array(hex_block)
+
+    # 2. Place 8 on border midpoints and near corners
+    border_points = [
+        [0.13, 0.13], [0.87, 0.13], [0.13, 0.87], [0.87, 0.87],  # near corners
+        [0.5, 0.03], [0.5, 0.97],   # top/bottom edges
+        [0.03, 0.5], [0.97, 0.5],   # left/right edges
+    ]
+    centers[core_n:core_n+8] = np.array(border_points)
+
+    # 3. Place 4 at edge quarters
+    edge_points = [
+        [0.18, 0.5], [0.82, 0.5], [0.5, 0.18], [0.5, 0.82]
+    ]
+    centers[core_n+8:core_n+12] = np.array(edge_points)
+
+    # 4. Place 4 in the interior, slightly random within (0.35,0.65)
+    rng = np.random.default_rng(seed=99)
+    centers[core_n+12:core_n+16] = rng.uniform(
+        low=0.35, high=0.65, size=(4, 2)
+    )
+
+    # 5. Place last 6 in a loose inner ring (radius 0.28)
+    for i in range(6):
+        angle = 2 * np.pi * i / 6 + np.pi/18
+        centers[core_n+16+i] = [0.5 + 0.28 * np.cos(angle), 0.5 + 0.28 * np.sin(angle)]
+
+    # Clip to [0.01, 0.99]
+    centers = np.clip(centers, 0.01, 0.99)
+
+    # Compute maximum valid radii for this configuration
+    radii = compute_max_radii(centers)
+    return centers, radii
+>>>>>>> REPLACE
+
+</DIFF>

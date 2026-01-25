@@ -1,0 +1,199 @@
+# EVOLVE-BLOCK-START
+"""Adaptive hybrid hexagonal + hill-climbing + physics for n=26 circle packing"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Hybrid: Try several hexagonal layouts, hill-climb with adaptive multi-center moves,
+    then apply physics-based repulsive force refinement.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    n = 26
+    margin = 0.02
+    rng = np.random.default_rng(42)
+    # Candidate row layouts summing to 26
+    candidate_row_layouts = [
+        [6, 5, 6, 5, 4],
+        [5, 6, 5, 6, 4],
+        [6, 6, 5, 5, 4],
+        [5, 5, 6, 6, 4],
+        [6, 5, 5, 6, 4]
+    ]
+
+    best_sum = -np.inf
+    best_centers = None
+    best_radii = None
+
+    for row_counts in candidate_row_layouts:
+        max_cols = max(row_counts)
+        dx = (1 - 2*margin) / max_cols
+        h  = dx * np.sqrt(3) / 2
+
+        centers = np.zeros((n, 2))
+        idx = 0
+        for rid, cnt in enumerate(row_counts):
+            x_start = margin + (max_cols - cnt) * dx / 2
+            y = margin + rid * h
+            for c in range(cnt):
+                centers[idx, 0] = x_start + c * dx
+                centers[idx, 1] = y
+                idx += 1
+
+        # Hill-climbing with adaptive multi-center moves
+        centers, radii, s = adaptive_hill_climb(centers, dx, margin, rng)
+        if s > best_sum:
+            best_sum = s
+            best_centers = centers.copy()
+            best_radii = radii.copy()
+
+    # Physics-based post-refinement
+    best_centers = physics_relaxation(best_centers, best_radii, steps=40, margin=margin)
+    best_radii = compute_max_radii(best_centers)
+    return best_centers, best_radii
+
+def adaptive_hill_climb(init_centers, dx, margin, rng):
+    n = init_centers.shape[0]
+    centers = init_centers.copy()
+    radii = compute_max_radii(centers)
+    best_sum = radii.sum()
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    iters = 3500
+    initial_alpha = dx * 0.5
+    no_improve = 0
+    for t in range(iters):
+        # Adaptive: if no improvement for a while, increase multi-move chance and step
+        if no_improve > 200:
+            multi_prob = 0.5
+            alpha = initial_alpha * (1.0 - t/iters) * 1.5
+        else:
+            multi_prob = 0.2
+            alpha = initial_alpha * (1.0 - t/iters)
+        cand_centers = best_centers.copy()
+        if rng.uniform() < multi_prob:
+            count = rng.integers(2, 5)
+            indices = rng.choice(n, size=count, replace=False)
+            for i in indices:
+                delta = rng.uniform(-alpha, alpha, size=2)
+                cand_centers[i] += delta
+                cand_centers[i] = np.clip(cand_centers[i], margin, 1 - margin)
+        else:
+            i = int(rng.integers(n))
+            delta = rng.uniform(-alpha, alpha, size=2)
+            cand_centers[i] += delta
+            cand_centers[i] = np.clip(cand_centers[i], margin, 1 - margin)
+        cand_radii = compute_max_radii(cand_centers)
+        s = cand_radii.sum()
+        if s > best_sum + 1e-10:
+            best_sum = s
+            best_centers = cand_centers
+            best_radii = cand_radii
+            no_improve = 0
+        else:
+            no_improve += 1
+    return best_centers, best_radii, best_sum
+
+def physics_relaxation(centers, radii, steps=40, margin=0.02):
+    """
+    Physics-inspired repulsive force refinement of circle centers.
+    Args:
+        centers: (n,2) array of current centers
+        radii:   (n,) array of current radii
+        steps:   number of force relaxation steps
+        margin:  margin from square boundary
+    Returns:
+        refined_centers: (n,2) array
+    """
+    n = centers.shape[0]
+    centers = centers.copy()
+    for _ in range(steps):
+        forces = np.zeros_like(centers)
+        # Pairwise repulsive forces for overlap or near-overlap
+        for i in range(n):
+            for j in range(i+1, n):
+                d_vec = centers[j] - centers[i]
+                dist = np.linalg.norm(d_vec)
+                min_dist = radii[i] + radii[j] + 1e-6
+                if dist < min_dist:
+                    # Repulsive force proportional to overlap
+                    if dist > 1e-8:
+                        direction = d_vec / dist
+                    else:
+                        direction = np.random.uniform(-1,1,2)
+                        direction /= np.linalg.norm(direction)
+                    overlap = min_dist - dist
+                    f = 0.2 * overlap * direction
+                    forces[i] -= f
+                    forces[j] += f
+        # Boundary repulsion
+        for i in range(n):
+            x, y = centers[i]
+            r = radii[i]
+            # Left
+            if x - r < margin:
+                forces[i,0] += 0.2 * (margin - (x - r))
+            # Right
+            if x + r > 1 - margin:
+                forces[i,0] -= 0.2 * ((x + r) - (1 - margin))
+            # Bottom
+            if y - r < margin:
+                forces[i,1] += 0.2 * (margin - (y - r))
+            # Top
+            if y + r > 1 - margin:
+                forces[i,1] -= 0.2 * ((y + r) - (1 - margin))
+        # Update positions
+        centers += 0.15 * forces
+        # Keep in margins
+        centers = np.clip(centers, margin, 1 - margin)
+        radii = compute_max_radii(centers)
+    return centers
+
+def compute_max_radii(centers):
+    """
+    Given circle centers, compute the maximal non-overlapping radii
+    within the unit square by iteratively enforcing border and pairwise constraints
+    until convergence.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0],            # distance to left
+        centers[:,1],            # distance to bottom
+        1 - centers[:,0],        # right
+        1 - centers[:,1]         # top
+    ])
+    for _ in range(20):  # up to 20 sweeps for convergence
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.hypot(*(centers[i] - centers[j]))
+                if d <= 0:
+                    if radii[i] != 0.0 or radii[j] != 0.0:
+                        radii[i] = radii[j] = 0.0
+                        changed = True
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        new_ri = ri * scale
+                        new_rj = rj * scale
+                        if new_ri < ri or new_rj < rj:
+                            radii[i] = new_ri
+                            radii[j] = new_rj
+                            changed = True
+        if not changed:
+            break
+    return radii
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

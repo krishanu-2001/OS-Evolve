@@ -1,0 +1,76 @@
+<NAME>
+adaptive_multi_scale_local_repacking
+</NAME>
+
+<DESCRIPTION>
+Introduce a new final local greedy refinement phase that performs adaptive multi-scale local repacking moves for each circle. The approach tries multiple step sizes in decreasing order, and for each step size it attempts to move the circle in all 16 directions (including diagonals and extended diagonals) to find incremental improvements. This finer and more diverse local search should better optimize circle positions and increase the total sum of radii beyond the current eight-direction local moves, improving packing density.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # 4) Local greedy refinement
+    directions = np.array([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]])
+    for i in range(n):
+        orig = centers[i].copy()
+        for step in [0.01, 0.005, 0.0025, 0.001]:
+            improved = True
+            while improved:
+                improved = False
+                for d in directions:
+                    cand = orig + d * step
+                    cand = np.clip(cand, 0.01, 0.99)
+                    centers[i] = cand
+                    radii_cand = compute_max_radii(centers)
+                    if np.sum(radii_cand) > np.sum(radii):
+                        radii = radii_cand
+                        orig = cand
+                        improved = True
+                centers[i] = orig
+=======
+    # 4) Local greedy refinement
+    directions = np.array([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]])
+    for i in range(n):
+        orig = centers[i].copy()
+        for step in [0.01, 0.005, 0.0025, 0.001]:
+            improved = True
+            while improved:
+                improved = False
+                for d in directions:
+                    cand = orig + d * step
+                    cand = np.clip(cand, 0.01, 0.99)
+                    centers[i] = cand
+                    radii_cand = compute_max_radii(centers)
+                    if np.sum(radii_cand) > np.sum(radii):
+                        radii = radii_cand
+                        orig = cand
+                        improved = True
+                centers[i] = orig
+
+    # Additional adaptive multi-scale local repacking phase
+    extended_dirs = np.array([
+        [1,0], [-1,0], [0,1], [0,-1],
+        [1,1], [1,-1], [-1,1], [-1,-1],
+        [2,1], [1,2], [-2,1], [-1,2],
+        [2,-1], [1,-2], [-2,-1], [-1,-2]
+    ])
+    extended_dirs = extended_dirs / np.linalg.norm(extended_dirs, axis=1)[:, None]
+
+    step_sizes = [0.008, 0.004, 0.002, 0.001]
+
+    for i in range(n):
+        pos = centers[i].copy()
+        for step in step_sizes:
+            improved = True
+            while improved:
+                improved = False
+                for d in extended_dirs:
+                    cand = pos + d * step
+                    cand = np.clip(cand, 0.01, 0.99)
+                    centers[i] = cand
+                    radii_cand = compute_max_radii(centers)
+                    if np.sum(radii_cand) > np.sum(radii):
+                        radii = radii_cand
+                        pos = cand
+                        improved = True
+                centers[i] = pos
+>>>>>>> REPLACE

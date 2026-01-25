@@ -1,0 +1,47 @@
+<NAME>cluster_based_multimove</NAME>
+<DESCRIPTION>Replace the random selection of multiple circles in the multi-move step with a cluster-based approach: pick a random "root" circle and its nearest neighbors to form the move cluster, focusing perturbations on locally dense regions.</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+            # multi-center perturbation
+            idxs = rnd.choice(n, multi_count, replace=False)
+            old_ps = curr_centers[idxs].copy()
+            old_rs = curr_radii[idxs].copy()
+            # propose new positions
+            steps = rnd.randn(multi_count, 2) * step_scale
+            curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
+=======
+            # cluster-based multi-center perturbation
+            root = rnd.randint(n)
+            dists = np.linalg.norm(curr_centers - curr_centers[root], axis=1)
+            neighbors = np.argsort(dists)[1:multi_count]
+            idxs = np.concatenate(([root], neighbors))
+            old_ps = curr_centers[idxs].copy()
+            old_rs = curr_radii[idxs].copy()
+            # propose new positions on the cluster
+            steps = rnd.randn(idxs.shape[0], 2) * step_scale
+            curr_centers[idxs] = np.clip(old_ps + steps, 0.0, 1.0)
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>adaptive_single_step</NAME>
+<DESCRIPTION>Scale the single-center perturbation step size by each circle's local confinement: smaller circles get larger random steps to help them escape tight gaps, while larger circles use finer moves.</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+            # single-center perturbation
+            i = rnd.randint(n)
+            old_p = curr_centers[i].copy()
+            old_r = curr_radii[i]
+            step = rnd.randn(2) * step_scale
+            new_p = np.clip(old_p + step, 0.0, 1.0)
+=======
+            # single-center perturbation with adaptive step size
+            i = rnd.randint(n)
+            old_p = curr_centers[i].copy()
+            old_r = curr_radii[i]
+            # adaptive step: smaller circles get larger moves
+            max_r = curr_radii.max() if curr_radii.max() > 0 else 1.0
+            adapt = (1 - old_r / max_r + 0.1)
+            step = rnd.randn(2) * step_scale * adapt
+            new_p = np.clip(old_p + step, 0.0, 1.0)
+>>>>>>> REPLACE
+</DIFF>

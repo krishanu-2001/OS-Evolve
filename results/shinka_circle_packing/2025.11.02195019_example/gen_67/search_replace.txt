@@ -1,0 +1,61 @@
+<NAME>
+global_scale_after_greedy
+</NAME>
+
+<DESCRIPTION>
+Add a global uniform scaling step after the greedy repack in `_refine`, using a helper to compute the maximum overall scale factor allowed by current geometry so as to inflate all radii uniformly and capture any remaining slack.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        # Post-processing: greedy coordinate repacking sweep
+        c_greedy, r_greedy = self._greedy_repack(best_c, best_r, n_sweeps=2)
+        if r_greedy.sum() > best_r.sum():
+            best_c, best_r = c_greedy, r_greedy
+=======
+        # Post-processing: greedy coordinate repacking sweep
+        c_greedy, r_greedy = self._greedy_repack(best_c, best_r, n_sweeps=2)
+        if r_greedy.sum() > best_r.sum():
+            best_c, best_r = c_greedy, r_greedy
+
+        # Global uniform scaling to fill remaining gaps
+        scale = self._compute_global_scale(best_c, best_r)
+        if scale > 1.0:
+            best_r = best_r * scale
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+compute_global_scale_method
+</NAME>
+
+<DESCRIPTION>
+Define `_compute_global_scale` in the class, which finds the maximal uniform multiplier for all radii respecting both border and pairwise overlap constraints.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        return c, r
+=======
+        return c, r
+
+    def _compute_global_scale(self, centers: np.ndarray, radii: np.ndarray) -> float:
+        """Compute the maximum uniform scale factor to apply to all radii without causing overlaps or exceeding borders."""
+        # Border constraints
+        factors = np.concatenate([
+            centers[:, 0] / radii,
+            (1 - centers[:, 0]) / radii,
+            centers[:, 1] / radii,
+            (1 - centers[:, 1]) / radii
+        ])
+        fb = np.min(factors)
+        # Pairwise constraints (exclude self)
+        diff = centers[:, None, :] - centers[None, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        sumr = radii[:, None] + radii[None, :]
+        mask = ~np.eye(self.n, dtype=bool)
+        fp = np.min((dist / sumr)[mask])
+        # Return the limiting scale
+        return min(fb, fp)
+>>>>>>> REPLACE
+</DIFF>

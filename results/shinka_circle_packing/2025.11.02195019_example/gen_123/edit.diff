@@ -1,0 +1,435 @@
+--- a/original.py
++++ b/original.py
+@@ -1,199 +1,272 @@
+ # EVOLVE-BLOCK-START
+-"""Physics‐based circle packing for n=26 circles"""
+-
+ import numpy as np
++from scipy.spatial import cKDTree
+ 
+ def construct_packing():
+     """
+-    Construct and optimize an arrangement of 26 circles in a unit square
+-    using a force‐based inflate‐and‐relax algorithm to maximize the sum of radii.
++    Construct and optimize 26-circle packing in unit square.
++    Phases:
++    1) Strategic hybrid initialization (corners, edges, central hex cluster)
++    2) Maximal radii computation by iterative relaxation
++    3) Cluster-aware adaptive simulated annealing with multi-circle moves
++    4) Local greedy refinement for fine tuning
+     Returns:
+-        centers: np.array (26,2)
+-        radii:   np.array (26,)
+-    """
+-    np.random.seed(0)
++        centers (26,2), radii (26,)
++    """
+     n = 26
+-
+-    # 1) Strategic initialization: place 4 large circles at corners, 8 medium at edges, rest in center hex lattice
++    margin = 0.02
++    rng = np.random.default_rng(1234)
++
++    # Phase 1: Strategic hybrid initialization
++    centers = strategic_init(n, margin, rng)
++
++    # Phase 2: Compute initial maximal radii with relaxation
++    radii = compute_max_radii(centers)
++
++    # Phase 3: Adaptive cluster-aware simulated annealing
++    centers, radii = adaptive_simulated_annealing(centers, radii, margin, rng)
++
++    # Phase 4: Local greedy refinement sweep
++    centers, radii = local_greedy_repacking(centers, radii, margin)
++
++    return centers, radii
++
++
++def strategic_init(n, margin, rng):
++    """
++    Hybrid initialization:
++    - 4 large circles near corners
++    - 8 medium circles along edges between corners
++    - Remaining 14 in a hexagonal cluster near center
++    """
+     centers = np.zeros((n, 2))
+-    # Large corner circles (4)
+-    corner_r = 0.12
+-    corners = np.array([[corner_r, corner_r],
+-                        [1 - corner_r, corner_r],
+-                        [corner_r, 1 - corner_r],
+-                        [1 - corner_r, 1 - corner_r]])
++
++    # Large circles near corners
++    corner_r = 0.11
++    corners = np.array([
++        [margin + corner_r, margin + corner_r],
++        [1 - margin - corner_r, margin + corner_r],
++        [margin + corner_r, 1 - margin - corner_r],
++        [1 - margin - corner_r, 1 - margin - corner_r],
++    ])
+     centers[0:4] = corners
+-    # Medium edge circles (8): evenly spaced on edges between corners
++
++    # Medium circles on bottom and top edges (4 each)
+     edge_r = 0.07
+-    edge_positions = []
+-    # bottom edge
+-    xs = np.linspace(corner_r*2, 1 - corner_r*2, 4)
+-    for x in xs:
+-        edge_positions.append([x, edge_r])
+-    # top edge
+-    for x in xs:
+-        edge_positions.append([x, 1 - edge_r])
+-    centers[4:12] = np.array(edge_positions)
+-    # Left and right edge circles (4)
+-    ys = np.linspace(corner_r*2, 1 - corner_r*2, 4)
+-    left_right_edges = []
+-    for y in ys:
+-        left_right_edges.append([edge_r, y])
+-    for y in ys:
+-        left_right_edges.append([1 - edge_r, y])
+-    centers = np.vstack([centers[:12], np.array(left_right_edges)])
+-    # Now fill remaining centers with hex lattice points inside center square [0.2,0.8]^2
+-    remaining = n - centers.shape[0]
+-    m = int(np.ceil(np.sqrt(remaining / 0.866)))  # hex grid rows estimate
+-    dx = 0.6 / (m - 1)
++    xs = np.linspace(corners[0,0] + 0.05, corners[1,0] - 0.05, 4)
++    bottom = np.column_stack((xs, np.full_like(xs, margin + edge_r)))
++    top = np.column_stack((xs, np.full_like(xs, 1 - margin - edge_r)))
++    centers[4:12] = np.vstack([bottom, top])
++
++    # Remaining 14 circles in hex cluster centered at (0.5,0.5)
++    remaining = n - 12
++    hex_pts = hex_cluster(remaining, center=(0.5,0.5), radius=0.3, margin=margin)
++    centers[12:] = hex_pts
++
++    # Add small jitter to break symmetry
++    centers += (rng.random((n, 2)) - 0.5) * 0.01
++    centers = np.clip(centers, margin, 1 - margin)
++
++    return centers
++
++
++def hex_cluster(num, center, radius, margin):
++    """
++    Generate approximately 'num' points in a hexagonal cluster near 'center'.
++    """
++    rows = 1
++    while 3*rows*rows - 3*rows + 1 < num:
++        rows += 1
++
++    pts = []
++    dx = radius / rows
+     dy = dx * np.sqrt(3) / 2
+-    hex_pts = []
+-    for i in range(m):
+-        for j in range(m):
+-            x = 0.2 + j * dx + (i % 2) * (dx / 2)
+-            y = 0.2 + i * dy
+-            if x <= 0.8 and y <= 0.8:
+-                hex_pts.append((x, y))
+-    hex_pts = np.array(hex_pts)
+-    # Select closest remaining points to center (0.5,0.5)
+-    center_point = np.array([0.5, 0.5])
+-    d_center = np.linalg.norm(hex_pts - center_point, axis=1)
+-    idx = np.argsort(d_center)[:remaining]
+-    centers = np.vstack([centers, hex_pts[idx]])
+-    # Jitter small random noise to break symmetry
+-    centers += (np.random.rand(n, 2) - 0.5) * 0.01
+-    centers = np.clip(centers, 0.01, 0.99)
+-
+-    # 2) Iteratively compute radii and apply force‐based relaxation
+-    radii = compute_max_radii(centers)
+-    alpha = 0.02
+-    for it in range(600):
+-        forces = np.zeros((n, 2))
+-
+-        # Pairwise overlap repulsion
+-        for i in range(n):
+-            for j in range(i + 1, n):
+-                dxy = centers[i] - centers[j]
+-                dist = np.hypot(dxy[0], dxy[1]) + 1e-8
+-                allow = radii[i] + radii[j]
+-                if dist < allow:
+-                    # push them apart
+-                    overlap = (allow - dist) / dist
+-                    forces[i] +=  dxy * overlap
+-                    forces[j] -=  dxy * overlap
+-
+-        # Border corrective forces
+-        for i in range(n):
+-            x, y = centers[i]
+-            r = radii[i]
+-            # left border
+-            if x - r < 0:
+-                forces[i, 0] += (r - x)
+-            # right border
+-            if x + r > 1:
+-                forces[i, 0] -= (x + r - 1)
+-            # bottom border
+-            if y - r < 0:
+-                forces[i, 1] += (r - y)
+-            # top border
+-            if y + r > 1:
+-                forces[i, 1] -= (y + r - 1)
+-
+-        # Update centers
+-        centers += alpha * forces
+-        centers = np.clip(centers, 0.01, 0.99)
+-
+-        # Recompute radii and decay step
+-        radii = compute_max_radii(centers)
+-        alpha *= 0.995
+-
+-    # 3) Final simulated annealing to escape shallow local minima
+-    T0 = 0.001
+-    centers_sa = centers.copy()
+-    radii_sa = radii.copy()
+-    sum_sa = radii_sa.sum()
+-
+-    # Initialize adaptive parameters
+-    improvement_counter = 0
+-    no_improve_counter = 0
+-    max_no_improve = 100
+-    improvement_threshold = 1e-4
+-    initial_temp = T0
+-    temp = initial_temp
+-
+-    for k in range(2000):
+-        i = np.random.randint(n)
+-        old_pos = centers_sa[i].copy()
+-        # decaying perturbation
+-        delta = np.random.randn(2) * (0.005 * (1 - k / 2000))
+-        centers_sa[i] = np.clip(centers_sa[i] + delta, 0.01, 0.99)
+-        radii_tmp = compute_max_radii(centers_sa)
+-        sum_new = radii_tmp.sum()
+-
+-        # Adaptive temperature adjustment based on recent improvements
+-        if sum_new > sum_sa + improvement_threshold:
+-            improvement_counter += 1
+-            no_improve_counter = 0
+-        else:
+-            no_improve_counter += 1
+-
+-        # Adjust temperature
+-        if no_improve_counter >= max_no_improve:
+-            # Increase temperature to escape local minima
+-            temp = min(temp * 1.1, 0.01)
+-            no_improve_counter = 0
+-        elif improvement_counter >= 10:
+-            # Decrease temperature to refine
+-            temp = max(temp * 0.9, 1e-6)
+-            improvement_counter = 0
+-
+-        T = temp
+-        # Acceptance criterion with adaptive T
+-        delta_score = sum_new - sum_sa
+-        if delta_score > 0 or np.random.rand() < np.exp(delta_score / max(T, 1e-12)):
+-            sum_sa = sum_new
+-            radii_sa = radii_tmp
+-        else:
+-            centers_sa[i] = old_pos
+-    centers, radii = centers_sa, radii_sa
+-
+-    return centers, radii
++    count = 0
++    for i in range(rows):
++        row_len = rows + i
++        y = center[1] - dy*(rows-1)/2 + i*dy
++        x_start = center[0] - dx*(row_len-1)/2
++        for j in range(row_len):
++            if count >= num:
++                break
++            x = x_start + j*dx
++            x = np.clip(x, margin, 1 - margin)
++            y_clipped = np.clip(y, margin, 1 - margin)
++            pts.append([x, y_clipped])
++            count += 1
++        if count >= num:
++            break
++    pts = np.array(pts)
++    if pts.shape[0] < num:
++        extra = np.random.uniform(margin, 1 - margin, size=(num - pts.shape[0], 2))
++        pts = np.vstack([pts, extra])
++    return pts[:num]
++
+ 
+ def compute_max_radii(centers):
+     """
+-    Given fixed centers, compute max radii so circles stay within [0,1]^2 and don't overlap.
+-    Uses a few relaxation passes to resolve pairwise constraints.
++    Compute maximal radii ensuring no overlap and boundary containment.
++    Iteratively relax pairwise constraints until convergence.
+     """
+     n = centers.shape[0]
+-    # initial border‐limited radii
+     xs, ys = centers[:,0], centers[:,1]
+     radii = np.minimum.reduce([xs, ys, 1 - xs, 1 - ys])
+ 
+-    # Relax pairwise constraints
+-    # Relax pairwise constraints until convergence
+     for _ in range(50):
+         max_change = 0.0
+         for i in range(n):
+-            for j in range(i + 1, n):
++            for j in range(i+1, n):
+                 dxy = centers[i] - centers[j]
+-                dist = np.hypot(dxy[0], dxy[1])
+-                max_sum = radii[i] + radii[j]
+-                if max_sum > dist and dist > 1e-12:
+-                    scale = dist / max_sum
++                dist = np.hypot(*dxy)
++                total = radii[i] + radii[j]
++                if total > dist and dist > 1e-12:
++                    scale = dist / total
+                     old_i, old_j = radii[i], radii[j]
+                     radii[i] *= scale
+                     radii[j] *= scale
+-                    max_change = max(max_change, abs(radii[i] - old_i), abs(radii[j] - old_j))
++                    max_change = max(max_change, abs(radii[i]-old_i), abs(radii[j]-old_j))
+         if max_change < 1e-6:
+             break
+     return radii
++
++
++def adaptive_simulated_annealing(centers, radii, margin, rng):
++    """
++    Simulated annealing with cluster moves using KD-tree neighbor queries.
++    Adaptive temperature schedule with escape from stagnation.
++    """
++    n = centers.shape[0]
++    best_centers = centers.copy()
++    best_radii = radii.copy()
++    best_sum = np.sum(radii)
++
++    current_centers = centers.copy()
++    current_radii = radii.copy()
++    current_sum = best_sum
++
++    T_init = 0.01
++    T_min = 1e-5
++    T = T_init
++
++    stagnation = 0
++    max_stagn = 300
++    alpha_slow = 0.9995
++    alpha_fast = 0.995
++
++    tree = cKDTree(current_centers)
++
++    for it in range(8000):
++        if rng.random() < 0.25:
++            # Cluster move: pick random circle and neighbors within radius
++            idx = rng.integers(n)
++            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
++            if len(neighbors) > 4:
++                neighbors = rng.choice(neighbors, size=4, replace=False)
++            step_size = 0.02 * (T / T_init)**0.5
++            delta = rng.uniform(-step_size, step_size, size=2)
++            candidate_centers = current_centers.copy()
++            for i in neighbors:
++                candidate_centers[i] += delta
++            candidate_centers = np.clip(candidate_centers, margin, 1 - margin)
++        else:
++            # Single circle move
++            idx = rng.integers(n)
++            step_size = 0.03 * (T / T_init)**0.5
++            delta = rng.uniform(-step_size, step_size, size=2)
++            candidate_centers = current_centers.copy()
++            candidate_centers[idx] += delta
++            candidate_centers = np.clip(candidate_centers, margin, 1 - margin)
++
++        candidate_radii = compute_max_radii(candidate_centers)
++        candidate_sum = np.sum(candidate_radii)
++        delta_score = candidate_sum - current_sum
++
++        accept = False
++        if delta_score > 0:
++            accept = True
++        else:
++            accept = rng.random() < np.exp(delta_score / T)
++
++        if accept:
++            current_centers = candidate_centers
++            current_radii = candidate_radii
++            current_sum = candidate_sum
++            tree = cKDTree(current_centers)
++            if current_sum > best_sum + 1e-8:
++                best_sum = current_sum
++                best_centers = current_centers.copy()
++                best_radii = current_radii.copy()
++                stagnation = 0
++            else:
++                stagnation += 1
++        else:
++            stagnation += 1
++
++        # Adaptive temperature decay
++        if stagnation < max_stagn:
++            T *= alpha_slow
++        else:
++            T *= alpha_fast
++
++        if T < T_min:
++            T = T_min
++
++        # Reset temperature if stagnation too long
++        if stagnation > 1000:
++            T = T_init
++            stagnation = 0
++
++    return best_centers, best_radii
++
++
++def local_greedy_repacking(centers, radii, margin):
++    """
++    Local greedy refinement: for each circle, try small moves in 8 directions
++    to increase sum of radii until no improvement.
++    """
++    n = centers.shape[0]
++    centers = centers.copy()
++    radii = radii.copy()
++    rng = np.random.default_rng(9999)
++    directions = np.array([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]])
++    step_sizes = [0.01, 0.005, 0.0025, 0.001]
++
++    for step in step_sizes:
++        improved = True
++        while improved:
++            improved = False
++            for i in range(n):
++                base_center = centers[i].copy()
++                base_radii = compute_max_radii(centers)
++                base_sum = np.sum(base_radii)
++
++                best_center = base_center.copy()
++                best_sum_local = base_sum
++
++                for d in directions:
++                    candidate = base_center + d * step
++                    candidate = np.clip(candidate, margin, 1 - margin)
++                    centers[i] = candidate
++                    candidate_radii = compute_max_radii(centers)
++                    candidate_sum = np.sum(candidate_radii)
++                    if candidate_sum > best_sum_local + 1e-8:
++                        best_sum_local = candidate_sum
++                        best_center = candidate.copy()
++
++                centers[i] = best_center
++                if best_sum_local > base_sum + 1e-8:
++                    improved = True
++
++    radii = compute_max_radii(centers)
++    return centers, radii
++
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

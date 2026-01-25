@@ -1,0 +1,118 @@
+<NAME>
+greedy_gap_filling_sampling
+</NAME>
+
+<DESCRIPTION>
+Enhance the greedy initialization phase by performing targeted local sampling around the boundaries of gaps after each circle is placed. Specifically, after the initial uniform sampling, add extra candidate points by sampling random points along the square boundary and at the edge of previously placed circles. This is designed to find better positions in hard-to-fill edge and corner gaps, which global random sampling often misses, potentially increasing the sum of radii and giving simulated annealing a better starting configuration.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def greedy_initial(n, samples=8000, seed=0):
+    """
+    Sequentially place n circles.
+    At each step, sample 'samples' random points and pick the one
+    with the largest feasible radius given existing circles.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    for k in range(n):
+        pts = rnd.rand(samples,2)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # for first circle just pick the best by walls
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by walls
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+    return np.array(centers), np.array(radii)
+=======
+def greedy_initial(n, samples=8000, seed=0):
+    """
+    Sequentially place n circles.
+    At each step, sample 'samples' random points and pick the one
+    with the largest feasible radius given existing circles.
+    Additionally, after initial sampling, perform extra gap-filling sampling on
+    boundaries and around placed circle edges to better fill edges/corners.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    for k in range(n):
+        pts = rnd.rand(samples,2)
+        # --- Gap-filling candidates ---
+        # (1) Sample random points along boundary
+        n_bdry = 100 if k > 8 else 0
+        if n_bdry > 0:
+            sides = rnd.randint(4, size=n_bdry)
+            bdry_pts = np.zeros((n_bdry, 2))
+            vals = rnd.rand(n_bdry)
+            for j, s in enumerate(sides):
+                if s == 0:   # left edge: (0, y)
+                    bdry_pts[j] = [0, vals[j]]
+                elif s == 1: # right edge: (1, y)
+                    bdry_pts[j] = [1, vals[j]]
+                elif s == 2: # bottom: (x, 0)
+                    bdry_pts[j] = [vals[j], 0]
+                else:        # top: (x, 1)
+                    bdry_pts[j] = [vals[j], 1]
+            pts = np.vstack([pts, bdry_pts])
+        # (2) Sample points near edges of previously placed circles
+        if k > 2:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            edge_pts = []
+            n_edge = 10  # per circle
+            for ci, ri in zip(arr_centers, arr_radii):
+                angles = rnd.rand(n_edge)*2*np.pi
+                # slightly outside actual circle to favor filling gaps
+                rp = ri + 0.01 + 0.02*rnd.rand(n_edge)
+                xs = ci[0] + rp*np.cos(angles)
+                ys = ci[1] + rp*np.sin(angles)
+                local = np.stack([xs, ys], axis=1)
+                # keep inside square
+                local = local[(local[:,0]>=0) & (local[:,0]<=1) & (local[:,1]>=0) & (local[:,1]<=1)]
+                edge_pts.append(local)
+            if len(edge_pts):
+                pts = np.vstack([pts] + edge_pts)
+
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # for first circle just pick the best by walls
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by walls
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+    return np.array(centers), np.array(radii)
+>>>>>>> REPLACE
+
+</DIFF>

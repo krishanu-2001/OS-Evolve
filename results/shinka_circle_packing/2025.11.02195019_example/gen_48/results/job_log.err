@@ -1,0 +1,4 @@
+/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_48/main.py:75: RuntimeWarning: divide by zero encountered in divide
+  scale = np.minimum(1.0, D / sumr)
+/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_48/main.py:75: RuntimeWarning: invalid value encountered in divide
+  scale = np.minimum(1.0, D / sumr)

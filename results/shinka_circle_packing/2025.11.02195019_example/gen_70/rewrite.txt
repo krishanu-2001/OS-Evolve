@@ -1,0 +1,306 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+from typing import Callable, List, Tuple
+
+#------------------------------------------------------------------------------#
+# Vectorized radii calculator shared by all phases
+#------------------------------------------------------------------------------#
+def compute_radii(centers: np.ndarray, max_sweeps: int, tol: float) -> np.ndarray:
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0], centers[:,1],
+        1 - centers[:,0], 1 - centers[:,1]
+    ])
+    for _ in range(max_sweeps):
+        diff = centers[:,None,:] - centers[None,:,:]
+        D = np.linalg.norm(diff, axis=2) + np.eye(n)
+        sumr = radii[:,None] + radii[None,:]
+        scale = np.minimum(1.0, D / sumr)
+        min_scale = scale.min(axis=1)
+        new_r = radii * min_scale
+        if np.max(np.abs(new_r - radii)) < tol:
+            break
+        radii = new_r
+    return radii
+
+#------------------------------------------------------------------------------#
+# Phase interface: each phase gets (centers, radii) and returns an updated pair
+#------------------------------------------------------------------------------#
+class PackingPhase:
+    def apply(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError
+
+#------------------------------------------------------------------------------#
+# 1) Simulated‐annealing phase with occasional multi‐circle moves & adaptive schedule
+#------------------------------------------------------------------------------#
+class AnnealingPhase(PackingPhase):
+    def __init__(self,
+                 refine_iters: int,
+                 T0: float,
+                 alpha: float,
+                 sigma_base: float,
+                 sigma_multi: float,
+                 stagnation_limit: int,
+                 max_sweeps: int,
+                 tol: float):
+        self.refine_iters = refine_iters
+        self.T0 = T0
+        self.alpha = alpha
+        self.sigma_base = sigma_base
+        self.sigma_multi = sigma_multi
+        self.stagnation_limit = stagnation_limit
+        self.max_sweeps = max_sweeps
+        self.tol = tol
+
+    def apply(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = centers.shape[0]
+        curr_c, curr_r = centers.copy(), radii.copy()
+        best_c, best_r = curr_c.copy(), curr_r.copy()
+        curr_score = curr_r.sum()
+        best_score = curr_score
+        T = self.T0
+        stagnation = 0
+
+        for _ in range(self.refine_iters):
+            # adaptive perturbation
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(n)]
+
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = compute_radii(c_new, self.max_sweeps, self.tol)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if score_new > best_score:
+                    best_c, best_r, best_score = c_new.copy(), r_new.copy(), score_new
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+
+            T *= self.alpha
+
+        return best_c, best_r
+
+#------------------------------------------------------------------------------#
+# 2) Localized greedy repacking: each circle locally resampled around current pos
+#------------------------------------------------------------------------------#
+class GreedyRepackPhase(PackingPhase):
+    def __init__(self, n_sweeps: int = 2, local_samples: int = 12, global_samples: int = 4):
+        self.n_sweeps = n_sweeps
+        self.local_samples = local_samples
+        self.global_samples = global_samples
+
+    def apply(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = centers.shape[0]
+        c = centers.copy()
+        for _ in range(self.n_sweeps):
+            for i in range(n):
+                fixed = np.delete(c, i, axis=0)
+                best_r, best_pos = radii[i], c[i].copy()
+                # local sampling
+                for _ in range(self.local_samples):
+                    offset = 0.05 * (np.random.rand(2) - 0.5)
+                    sample = np.clip(c[i] + offset, 0.0, 1.0)
+                    r_cand = min(
+                        min(sample[0], sample[1], 1-sample[0], 1-sample[1]),
+                        np.min(np.linalg.norm(fixed - sample, axis=1))
+                    )
+                    if r_cand > best_r:
+                        best_r, best_pos = r_cand, sample
+                # global sampling
+                for _ in range(self.global_samples):
+                    sample = np.random.rand(2)
+                    r_cand = min(
+                        min(sample[0], sample[1], 1-sample[0], 1-sample[1]),
+                        np.min(np.linalg.norm(fixed - sample, axis=1))
+                    )
+                    if r_cand > best_r:
+                        best_r, best_pos = r_cand, sample
+                c[i] = best_pos
+        r_new = compute_radii(c, 20, 1e-6)
+        return c, r_new
+
+#------------------------------------------------------------------------------#
+# 3) Force‐based relaxation to resolve overlaps and push circles apart
+#------------------------------------------------------------------------------#
+class ForceRelaxPhase(PackingPhase):
+    def __init__(self, force_iters: int, force_lr: float, max_sweeps: int, tol: float):
+        self.force_iters = force_iters
+        self.force_lr = force_lr
+        self.max_sweeps = max_sweeps
+        self.tol = tol
+
+    def apply(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = centers.shape[0]
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = compute_radii(c, self.max_sweeps, self.tol)
+            diff = c[:,None,:] - c[None,:,:]
+            dist = np.linalg.norm(diff, axis=2) + np.eye(n)
+            overlap = r[:,None] + r[None,:] - dist
+            mask = overlap > 0
+            dirs = np.zeros_like(diff)
+            nz = dist > 0
+            dirs[nz] = diff[nz] / dist[nz][...,None]
+            f = overlap[...,None] * dirs
+            forces = (
+                -np.sum(f * mask[...,None], axis=1) +
+                 np.sum(f * mask[...,None], axis=0)
+            )
+            # border repulsion
+            left  = np.where(c[:,0] < r, (r - c[:,0]), 0)
+            right = np.where(1-c[:,0] < r, (r - (1-c[:,0])), 0)
+            down  = np.where(c[:,1] < r, (r - c[:,1]), 0)
+            up    = np.where(1-c[:,1] < r, (r - (1-c[:,1])), 0)
+            forces[:,0] += left - right
+            forces[:,1] += down - up
+
+            c += self.force_lr * forces
+            c = np.clip(c, 0.0, 1.0)
+
+        r_final = compute_radii(c, self.max_sweeps, self.tol)
+        return c, r_final
+
+#------------------------------------------------------------------------------#
+# 4) Global uniform scaling to fill any slack
+#------------------------------------------------------------------------------#
+class GlobalScalePhase(PackingPhase):
+    def apply(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = centers.shape[0]
+        # border constraints
+        f1 = np.min(np.vstack([
+            centers[:,0] / radii,
+            centers[:,1] / radii,
+            (1-centers[:,0]) / radii,
+            (1-centers[:,1]) / radii
+        ]), axis=0)
+        # pairwise constraints
+        diff = centers[:,None,:] - centers[None,:,:]
+        dist = np.linalg.norm(diff, axis=2)
+        sumr = radii[:,None] + radii[None,:]
+        mask = ~np.eye(n, dtype=bool)
+        fp = np.min(dist[mask] / sumr[mask])
+        scale = min(np.min(f1), fp)
+        if scale > 1.0:
+            radii = radii * scale
+        return centers, radii
+
+#------------------------------------------------------------------------------#
+# Orchestrator: tries multiple initial layouts through the phase pipeline
+#------------------------------------------------------------------------------#
+class PipelineCirclePacker:
+    def __init__(self):
+        self.n = 26
+        self.max_sweeps = 20
+        self.tol = 1e-6
+
+        # initial layouts
+        self.init_methods: List[Callable[[], np.ndarray]] = [
+            self._radial_layout,
+            self._hex_layout([6,5,6,5,4]),
+            self._ring_layout
+        ]
+
+        # assemble pipeline
+        self.pipeline: List[PackingPhase] = [
+            AnnealingPhase(
+                refine_iters=1000, T0=1e-2, alpha=0.995,
+                sigma_base=0.02, sigma_multi=0.06,
+                stagnation_limit=150,
+                max_sweeps=self.max_sweeps, tol=self.tol
+            ),
+            GreedyRepackPhase(n_sweeps=3),
+            ForceRelaxPhase(force_iters=80, force_lr=0.015, max_sweeps=self.max_sweeps, tol=self.tol),
+            GlobalScalePhase()
+        ]
+
+    def optimize(self) -> Tuple[np.ndarray, np.ndarray]:
+        best_score = -np.inf
+        best_c, best_r = None, None
+        for init in self.init_methods:
+            c = init()
+            c = np.clip(c, 0.0, 1.0)
+            r = compute_radii(c, self.max_sweeps, self.tol)
+            for phase in self.pipeline:
+                c, r = phase.apply(c, r)
+            score = r.sum()
+            if score > best_score:
+                best_score, best_c, best_r = score, c.copy(), r.copy()
+        return best_c, best_r
+
+    def _radial_layout(self) -> np.ndarray:
+        c = np.zeros((self.n, 2))
+        c[0] = [0.5, 0.5]
+        r1, r2 = 0.28, 0.65
+        for i in range(8):
+            θ = 2*np.pi*i/8 + np.pi/16
+            c[i+1] = [0.5 + r1*np.cos(θ), 0.5 + r1*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13 + np.pi/13
+            c[i+9] = [0.5 + r2*np.cos(θ), 0.5 + r2*np.sin(θ)]
+        corners = [(0.1,0.1),(0.9,0.1),(0.1,0.9),(0.9,0.9)]
+        for k, p in enumerate(corners, start=22):
+            c[k] = p
+        return c
+
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = 0.1
+            max_row = max(rows)
+            dx = (1 - 2*margin)/(max_row - 1) if max_row > 1 else 1 - 2*margin
+            dy = dx * np.sqrt(3)/2
+            y0 = (1 - dy*(len(rows)-1)) / 2
+            pts = []
+            for i, cnt in enumerate(rows):
+                y = y0 + i*dy
+                row_w = dx*(cnt-1) if cnt>1 else 0
+                x0 = (1 - row_w)/2
+                xs = x0 + np.arange(cnt)*dx if cnt>1 else np.array([x0])
+                for x in xs:
+                    pts.append((x, y))
+            arr = np.array(pts)
+            if len(arr) > self.n:
+                return arr[:self.n]
+            if len(arr) < self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr, pad])
+            return arr
+        return layout
+
+    def _ring_layout(self) -> np.ndarray:
+        c = np.zeros((self.n, 2))
+        c[0] = [0.5, 0.5]
+        for i in range(8):
+            θ = 2*np.pi*i/8
+            c[i+1] = [0.5 + 0.3*np.cos(θ), 0.5 + 0.3*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13
+            c[i+9] = [0.5 + 0.65*np.cos(θ), 0.5 + 0.65*np.sin(θ)]
+        c[25] = [0.1, 0.1]
+        return c
+
+def construct_packing() -> Tuple[np.ndarray, np.ndarray]:
+    """Construct a 26‐circle packing in a unit square."""
+    packer = PipelineCirclePacker()
+    return packer.optimize()
+# EVOLVE-BLOCK-END
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

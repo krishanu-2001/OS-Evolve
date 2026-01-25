@@ -1,0 +1,145 @@
+<strategic_init_corner_larger>
+<<<<<<< SEARCH
+    # Place 4 large circles near corners (indices 0-3)
+    corner_offset = 0.07
+    corners = np.array([
+        [margin + corner_offset, margin + corner_offset],
+        [1 - margin - corner_offset, margin + corner_offset],
+        [margin + corner_offset, 1 - margin - corner_offset],
+        [1 - margin - corner_offset, 1 - margin - corner_offset],
+    ])
+    centers[0:4] = corners
+=======
+    # Place 4 large circles near corners (indices 0-3) with slightly larger radius offset
+    corner_offset = 0.09
+    corners = np.array([
+        [margin + corner_offset, margin + corner_offset],
+        [1 - margin - corner_offset, margin + corner_offset],
+        [margin + corner_offset, 1 - margin - corner_offset],
+        [1 - margin - corner_offset, 1 - margin - corner_offset],
+    ])
+    centers[0:4] = corners
+>>>>>>> REPLACE
+</strategic_init_corner_larger>
+
+<adaptive_simulated_annealing_cluster_radius>
+<<<<<<< SEARCH
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+            # limit cluster size to max 4
+            if len(neighbors) > 4:
+                neighbors = rng.choice(neighbors, size=4, replace=False)
+            step_size = 0.02 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+=======
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.18)  # slightly larger cluster radius
+            # limit cluster size to max 5 (allow bigger clusters)
+            if len(neighbors) > 5:
+                neighbors = rng.choice(neighbors, size=5, replace=False)
+            step_size = 0.025 * (T / T_init)**0.5  # slightly larger step size for cluster moves
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+>>>>>>> REPLACE
+</adaptive_simulated_annealing_cluster_radius>
+
+<local_greedy_repacking_step_adaptive>
+<<<<<<< SEARCH
+    max_local_iters = 2000
+    step = 0.01
+
+    for _ in range(max_local_iters):
+        improved = False
+        for i in range(n):
+            base_center = centers[i].copy()
+            base_radii = compute_max_radii(centers)
+            base_sum = np.sum(base_radii)
+
+            # Try small random moves in 8 directions
+            directions = np.array([
+                [step,0], [-step,0], [0,step], [0,-step],
+                [step,step], [step,-step], [-step,step], [-step,-step]
+            ])
+
+            best_local_center = base_center.copy()
+            best_local_sum = base_sum
+
+            for d in directions:
+                new_center = base_center + d
+                new_center = np.clip(new_center, margin, 1 - margin)
+                centers[i] = new_center
+                new_radii = compute_max_radii(centers)
+                new_sum = np.sum(new_radii)
+                if new_sum > best_local_sum:
+                    best_local_sum = new_sum
+                    best_local_center = new_center.copy()
+
+            centers[i] = best_local_center
+            if best_local_sum > base_sum + 1e-8:
+                improved = True
+
+        if not improved:
+            break
+=======
+    max_local_iters = 3000  # increase iterations for finer local search
+    step = 0.012  # slightly larger initial step
+
+    for _ in range(max_local_iters):
+        improved = False
+        for i in range(n):
+            base_center = centers[i].copy()
+            base_radii = compute_max_radii(centers)
+            base_sum = np.sum(base_radii)
+
+            # Try small random moves in 8 directions with adaptive step sizes
+            directions = np.array([
+                [step,0], [-step,0], [0,step], [0,-step],
+                [step,step], [step,-step], [-step,step], [-step,-step]
+            ])
+
+            best_local_center = base_center.copy()
+            best_local_sum = base_sum
+
+            for d in directions:
+                new_center = base_center + d
+                new_center = np.clip(new_center, margin, 1 - margin)
+                centers[i] = new_center
+                new_radii = compute_max_radii(centers)
+                new_sum = np.sum(new_radii)
+                if new_sum > best_local_sum:
+                    best_local_sum = new_sum
+                    best_local_center = new_center.copy()
+
+            centers[i] = best_local_center
+            if best_local_sum > base_sum + 1e-8:
+                improved = True
+
+        if not improved:
+            break
+>>>>>>> REPLACE
+</local_greedy_repacking_step_adaptive>
+
+<local_greedy_repacking_add_micro_perturb>
+<<<<<<< SEARCH
+    return centers, radii
+=======
+    # Add micro perturbation phase to escape small local minima
+    micro_steps = 1000
+    micro_scale = 0.002
+    for _ in range(micro_steps):
+        i = np.random.randint(n)
+        orig = centers[i].copy()
+        delta = (np.random.rand(2) - 0.5) * 2 * micro_scale
+        centers[i] = np.clip(orig + delta, margin, 1 - margin)
+        new_radii = compute_max_radii(centers)
+        if np.sum(new_radii) > np.sum(radii) + 1e-8:
+            radii = new_radii
+        else:
+            centers[i] = orig
+
+    return centers, radii
+>>>>>>> REPLACE
+</local_greedy_repacking_add_micro_perturb>

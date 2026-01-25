@@ -1,0 +1,77 @@
+<NAME>force_refine_params</NAME>
+<DESCRIPTION>
+Introduce new parameters in the initializer to control the physics-based force refinement step: number of iterations and learning rate. These will be used by a later post-annealing refinement to further improve packing density.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        self.alpha = alpha
+=======
+        self.alpha = alpha
+        # Parameters for post-SA force-based refinement
+        self.force_iters = 50
+        self.force_lr = 0.005
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>post_sa_force_refinement</NAME>
+<DESCRIPTION>
+After the simulated annealing in `_refine`, invoke the new `_force_refine` step to apply repulsive forces and potentially escape local optima. Only accept the force-refined solution if it improves the total sum of radii.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        return best_c, best_r
+=======
+        # Post-SA force-based refinement to escape local optima
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+        return best_c, best_r
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>add_force_refine_method</NAME>
+<DESCRIPTION>
+Add a new method `_force_refine` that performs a small number of iterations of physics-inspired repulsive force adjustments on the circle centers. This local refinement enforces non-overlap and boundary constraints while nudging circles to improve total radii.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        return layout
+=======
+        return layout
+
+    def _force_refine(self, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Physics-inspired repulsive force refinement to adjust centers
+        and potentially improve the sum of radii.
+        """
+        c = centers.copy()
+        for _ in range(self.force_iters):
+            r = self._compute_radii(c)
+            forces = np.zeros_like(c)
+            # Pairwise repulsive forces for overlapping circles
+            diff = c[:, None, :] - c[None, :, :]
+            dist = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = r[:, None] + r[None, :]
+            overlap = sumr - dist
+            mask = overlap > 0
+            # compute normalized directions
+            dirs = np.zeros_like(diff)
+            nonzero = dist > 0
+            dirs[nonzero] = diff[nonzero] / dist[nonzero][..., None]
+            f = overlap[..., None] * dirs
+            # accumulate forces
+            forces -= np.sum(np.where(mask[..., None], f, 0), axis=1)
+            forces += np.sum(np.where(mask[..., None], f, 0), axis=0)
+            # border repulsion
+            # left/right
+            dx = np.where(c[:,0] < r, (r - c[:,0]), 0) - np.where((1 - c[:,0]) < r, (r - (1 - c[:,0])), 0)
+            dy = np.where(c[:,1] < r, (r - c[:,1]), 0) - np.where((1 - c[:,1]) < r, (r - (1 - c[:,1])), 0)
+            forces[:,0] += dx
+            forces[:,1] += dy
+            # update centers
+            c += self.force_lr * forces
+            c = np.clip(c, 0.0, 1.0)
+        r_final = self._compute_radii(c)
+        return c, r_final
+>>>>>>> REPLACE
+</DIFF>

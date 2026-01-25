@@ -1,0 +1,249 @@
+<NAME>
+adaptive_cluster_and_greedy_refinement
+</NAME>
+
+<DESCRIPTION>
+This modification combines an improved initialization with a more aggressive local greedy refinement phase. Instead of a fixed hexagonal cluster, the initialization now uses a multi-scale, layered approach, placing larger circles at corners, medium circles along edges, and smaller ones in a dense, multi-layered hexagonal pattern near the center. This provides a better starting configuration with higher potential for packing density. Additionally, the local greedy repacking is extended to perform multiple passes with decreasing step sizes, allowing circles to find more optimal positions iteratively, thus increasing the total sum of radii. This approach leverages the insight that a better initial placement combined with iterative local optimization can surpass previous heuristics.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def construct_packing():
+    n = 26
+    margin = 0.02
+    rng = np.random.default_rng(12345)
+
+    # Step 1: Strategic initialization
+    centers = strategic_init(n, margin)
+
+    # Step 2: Compute initial radii
+    radii = compute_max_radii(centers)
+
+    # Step 3: Adaptive simulated annealing with cluster moves
+    centers, radii = adaptive_simulated_annealing(centers, radii, margin, rng)
+
+    # Step 4: Post-annealing local greedy repacking sweep
+    centers, radii = local_greedy_repacking(centers, radii, margin)
+
+    return centers, radii
+=======
+def construct_packing():
+    n = 26
+    margin = 0.02
+    rng = np.random.default_rng(12345)
+
+    # Enhanced layered initialization with multiple size layers
+    centers = layered_init(n, margin)
+
+    # Compute initial radii
+    radii = compute_max_radii(centers)
+
+    # Run multiple greedy refinement passes with decreasing step sizes
+    centers, radii = multi_pass_greedy(centers, radii, margin)
+
+    # Optional: run annealing for further refinement
+    centers, radii = adaptive_simulated_annealing(centers, radii, margin, rng)
+
+    return centers, radii
+>>>>>>> REPLACE
+
+<NAME>
+layered_initialization_and_iterative_greedy
+</NAME>
+
+<DESCRIPTION>
+This change introduces a layered initialization that places large circles at corners, medium circles along edges, and multiple small circles in nested hexagonal layers near the center, improving the initial configuration. It then performs multiple greedy refinement passes with progressively smaller steps, allowing circles to locally optimize their positions iteratively. This approach enhances the starting point and the local search process, leading to higher total radii sum and better packing efficiency.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def strategic_init(n, margin):
+    """
+    Initialize circles with a hybrid pattern:
+    - Place 4 largest circles near corners
+    - Place medium sized circles near edges
+    - Place smaller circles in a dense hexagonal cluster near center
+    This exploits geometric insights about edge effects and size variation.
+    """
+    centers = np.zeros((n, 2))
+
+    # Place 4 large circles near corners (indices 0-3)
+    corner_offset = 0.07
+    corners = np.array([
+        [margin + corner_offset, margin + corner_offset],
+        [1 - margin - corner_offset, margin + corner_offset],
+        [margin + corner_offset, 1 - margin - corner_offset],
+        [1 - margin - corner_offset, 1 - margin - corner_offset],
+    ])
+    centers[0:4] = corners
+
+    # Place 8 medium circles along edges (indices 4-11)
+    edge_y = margin + 0.1
+    edge_x = margin + 0.1
+    # Bottom edge 4 circles evenly spaced between corners
+    centers[4:8, 0] = np.linspace(corners[0,0]+0.05, corners[1,0]-0.05, 4)
+    centers[4:8, 1] = margin + edge_y
+    # Left and right edges 4 circles evenly spaced (2 left, 2 right)
+    centers[8:10, 0] = margin + edge_x
+    centers[8:10, 1] = np.linspace(corners[0,1]+0.15, corners[2,1]-0.15, 2)
+    centers[10:12, 0] = 1 - margin - edge_x
+    centers[10:12, 1] = np.linspace(corners[1,1]+0.15, corners[3,1]-0.15, 2)
+
+    # Place 14 smaller circles in a hexagonal cluster near center (indices 12-25)
+    cluster_centers = hex_cluster(14, center=(0.5,0.5), radius=0.25, margin=margin)
+    centers[12:] = cluster_centers
+
+    return centers
+=======
+def layered_init(n, margin):
+    """
+    Initialize circles in multiple layers:
+    - 4 large circles at corners
+    - 8 medium circles along edges
+    - Multiple small circles in concentric hex layers near center
+    """
+    centers = np.zeros((n, 2))
+    # Place large corners
+    corner_offset = 0.07
+    corners = np.array([
+        [margin + corner_offset, margin + corner_offset],
+        [1 - margin - corner_offset, margin + corner_offset],
+        [margin + corner_offset, 1 - margin - corner_offset],
+        [1 - margin - corner_offset, 1 - margin - corner_offset],
+    ])
+    centers[0:4] = corners
+
+    # Place medium along edges
+    edge_positions = [
+        ([corners[0,0]+0.05, corners[0,1]+0.1], [corners[1,0]-0.05, corners[1,1]+0.1]),
+        ([corners[0,0]+0.1, corners[0,1]+0.05], [corners[2,0]+0.1, corners[2,1]-0.05]),
+        ([corners[2,0]+0.05, corners[2,1]-0.1], [corners[3,0]-0.05, corners[3,1]-0.1]),
+        ([corners[1,0]+0.1, corners[1,1]+0.05], [corners[3,0]-0.1, corners[3,1]-0.05])
+    ]
+    # Assign positions for 8 medium circles
+    centers[4:12, 0] = [
+        edge_positions[0][0][0], edge_positions[0][1][0],
+        edge_positions[1][0][0], edge_positions[1][1][0],
+        edge_positions[2][0][0], edge_positions[2][1][0],
+        edge_positions[3][0][0], edge_positions[3][1][0]
+    ]
+    centers[4:12, 1] = [
+        edge_positions[0][0][1], edge_positions[0][1][1],
+        edge_positions[1][0][1], edge_positions[1][1][1],
+        edge_positions[2][0][1], edge_positions[2][1][1],
+        edge_positions[3][0][1], edge_positions[3][1][1]
+    ]
+
+    # Place small circles in concentric hex layers near center
+    layers = 3
+    layer_radii = [0.15, 0.2, 0.25]
+    count = 12
+    for layer_idx, r in enumerate(layer_radii):
+        layer_centers = hex_cluster(6*(layer_idx+1), center=(0.5, 0.5), radius=r, margin=margin)
+        n_layer = layer_centers.shape[0]
+        centers[count:count+n_layer] = layer_centers
+        count += n_layer
+        if count >= n:
+            break
+    # If not enough, fill randomly
+    if count < n:
+        fill = np.random.uniform(margin, 1 - margin, size=(n - count, 2))
+        centers[count:] = fill
+    return centers
+>>>>>>> REPLACE
+
+<NAME>
+multi_pass_greedy_refinement
+</NAME>
+
+<DESCRIPTION>
+This change implements multiple passes of local greedy optimization with decreasing step sizes, allowing circles to iteratively improve their positions. Each pass refines the configuration by exploring smaller local moves, leading to a more densely packed arrangement. Combining this with the improved initialization yields higher total radii, leveraging the insight that iterative local refinement can surpass single-pass methods.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def local_greedy_repacking(centers, radii, margin):
+    """
+    For each circle, locally optimize its position by small moves to increase sum of radii.
+    """
+    n = centers.shape[0]
+    centers = centers.copy()
+    radii = radii.copy()
+    rng = np.random.default_rng(98765)
+
+    max_local_iters = 2000
+    step = 0.015
+
+    for _ in range(max_local_iters):
+        improved = False
+        for i in range(n):
+            base_center = centers[i].copy()
+            base_radii = compute_max_radii(centers)
+            base_sum = np.sum(base_radii)
+
+            # Try small random moves in 8 directions
+            directions = np.array([
+                [step,0], [-step,0], [0,step], [0,-step],
+                [step,step], [step,-step], [-step,step], [-step,-step]
+            ])
+
+            best_local_center = base_center.copy()
+            best_local_sum = base_sum
+
+            for d in directions:
+                new_center = base_center + d
+                new_center = np.clip(new_center, margin, 1 - margin)
+                centers[i] = new_center
+                new_radii = compute_max_radii(centers)
+                new_sum = np.sum(new_radii)
+                if new_sum > best_local_sum:
+                    best_local_sum = new_sum
+                    best_local_center = new_center.copy()
+
+            centers[i] = best_local_center
+            if best_local_sum > base_sum + 1e-8:
+                improved = True
+
+        if not improved:
+            break
+
+    radii = compute_max_radii(centers)
+    return centers, radii
+=======
+def multi_pass_greedy(centers, radii, margin):
+    """
+    Perform multiple greedy passes with decreasing step sizes
+    to iteratively improve circle positions.
+    """
+    n = centers.shape[0]
+    centers = centers.copy()
+    radii = radii.copy()
+    steps = [0.015, 0.008, 0.004]
+    for step in steps:
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n):
+                base_center = centers[i].copy()
+                base_radii = compute_max_radii(centers)
+                base_sum = np.sum(base_radii)
+
+                directions = np.array([
+                    [step,0], [-step,0], [0,step], [0,-step],
+                    [step,step], [step,-step], [-step,step], [-step,-step]
+                ])
+
+                for d in directions:
+                    new_center = base_center + d
+                    new_center = np.clip(new_center, margin, 1 - margin)
+                    centers[i] = new_center
+                    new_radii = compute_max_radii(centers)
+                    new_sum = np.sum(new_radii)
+                    if new_sum > base_sum + 1e-8:
+                        base_sum = new_sum
+                        improved = True
+                        break
+                else:
+                    centers[i] = base_center
+    return centers, compute_max_radii(centers)
+>>>>>>> REPLACE

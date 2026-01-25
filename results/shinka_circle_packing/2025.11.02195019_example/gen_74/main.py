@@ -1,0 +1,165 @@
+# EVOLVE-BLOCK-START
+"""Greedy largest empty circle initialization + physics relaxation for n=26 circle packing"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Place 26 circles by greedy largest‐empty‐circle, then refine by physics relaxation.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    n = 26
+    np.random.seed(0)
+    centers = []
+    radii   = []
+    # Parameters for sampling during greedy init
+    grid_n = 15          # grid resolution
+    rand_n = 300         # random samples per iteration
+
+    # Greedy placement
+    for k in range(n):
+        best_d = -1.0
+        best_pt = None
+
+        # generate candidate points: grid + random
+        xs = np.linspace(0.0, 1.0, grid_n)
+        ys = xs
+        # grid candidates
+        for x in xs:
+            for y in ys:
+                d = _clearance((x,y), centers, radii)
+                if d > best_d:
+                    best_d, best_pt = d, (x,y)
+        # random candidates
+        for _ in range(rand_n):
+            x = np.random.rand()
+            y = np.random.rand()
+            d = _clearance((x,y), centers, radii)
+            if d > best_d:
+                best_d, best_pt = d, (x,y)
+
+        # local refinement around best_pt
+        bx, by = best_pt
+        bd = best_d
+        for _ in range(20):
+            # small random perturb
+            dx, dy = (np.random.randn()*bd*0.5, np.random.randn()*bd*0.5)
+            x2 = np.clip(bx + dx, 0.0, 1.0)
+            y2 = np.clip(by + dy, 0.0, 1.0)
+            d2 = _clearance((x2,y2), centers, radii)
+            if d2 > bd:
+                bx, by, bd = x2, y2, d2
+        centers.append([bx, by])
+        radii.append(bd if bd>0 else 0.0)
+
+    centers = np.array(centers)
+    # Force‐based relaxation
+    centers = _physics_relax(centers, steps=200, lr=0.1)
+    radii   = compute_max_radii(centers)
+    return centers, radii
+
+def _clearance(pt, centers, radii):
+    """
+    Compute minimal allowed radius at point pt from boundary and existing circles.
+    """
+    x, y = pt
+    # distance to walls
+    dmin = min(x, 1-x, y, 1-y)
+    # distance to existing circles minus their radii
+    for (cx, cy), r in zip(centers, radii):
+        d = np.hypot(cx - x, cy - y) - r
+        if d < dmin:
+            dmin = d
+            if dmin <= 0:
+                return -1.0
+    return dmin
+
+def compute_max_radii(centers):
+    """
+    Given circle centers, compute maximal radii by iteratively enforcing
+    boundary and pairwise non-overlap constraints.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0], centers[:,1],
+        1-centers[:,0], 1-centers[:,1]
+    ]).copy()
+    # iterative refinement
+    for _ in range(20):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.hypot(*(centers[i] - centers[j]))
+                if d <= 0:
+                    if radii[i] != 0 or radii[j] != 0:
+                        radii[i] = radii[j] = 0.0
+                        changed = True
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        new_ri = ri * scale
+                        new_rj = rj * scale
+                        if new_ri < ri or new_rj < rj:
+                            radii[i], radii[j] = new_ri, new_rj
+                            changed = True
+        if not changed:
+            break
+    return radii
+
+def _physics_relax(centers, steps=200, lr=0.1):
+    """
+    Physics‐based force relaxation: at each step recompute radii, then
+    apply repulsive forces for overlaps and boundary pushes.
+    """
+    n = centers.shape[0]
+    c = centers.copy()
+    for _ in range(steps):
+        r = compute_max_radii(c)
+        F = np.zeros_like(c)
+        # pairwise repulsion
+        for i in range(n):
+            for j in range(i+1, n):
+                vec = c[j] - c[i]
+                dist = np.hypot(vec[0], vec[1])
+                if dist <= 0:
+                    continue
+                overlap = (r[i] + r[j]) - dist
+                if overlap > 0:
+                    dir = vec / dist
+                    f = overlap * dir * 0.5
+                    F[i] -= f
+                    F[j] += f
+        # boundary repulsion
+        for i in range(n):
+            x, y = c[i]
+            ri = r[i]
+            # left
+            if x - ri < 0:
+                F[i,0] += (ri - x)
+            # right
+            if x + ri > 1:
+                F[i,0] -= (x + ri - 1)
+            # bottom
+            if y - ri < 0:
+                F[i,1] += (ri - y)
+            # top
+            if y + ri > 1:
+                F[i,1] -= (y + ri - 1)
+        # update positions
+        c += lr * F
+        c = np.clip(c, 0.0, 1.0)
+    return c
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

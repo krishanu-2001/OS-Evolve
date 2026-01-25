@@ -1,0 +1,231 @@
+# EVOLVE-BLOCK-START
+import numpy as np
+import math
+
+def multi_scale_greedy_initial(n, base_samples=6000, local_samples=30, seed=0):
+    """
+    Multi-scale greedy initialization:
+    - At each placement step, sample many random points globally.
+    - Additionally, sample multiple local points around existing circles'
+      edges at different scales to fill gaps.
+    - Choose the candidate point with the largest feasible radius.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    for k in range(n):
+        # Global random samples
+        pts = rnd.rand(base_samples, 2)
+        # Local multi-scale samples around placed circles with adaptive sample counts
+        if k > 0:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            local_pts_list = []
+            scales = [0.07, 0.035, 0.015]  # start from larger scales to smaller
+            # Adaptive local sample counts per scale: fewer samples at large scale early, more at small scale later
+            scale_weights = [max(1, int(local_samples * (1 - k / n) * 0.5)),
+                             max(1, int(local_samples * (k / n) * 0.7)),
+                             max(1, int(local_samples * (k / n) * 1.2))]
+            for c, r in zip(arr_centers, arr_radii):
+                for scale, count in zip(scales, scale_weights):
+                    angles = rnd.rand(count)*2*np.pi
+                    radii_local = r + scale + rnd.rand(count)*scale*0.5
+                    xs = c[0] + radii_local * np.cos(angles)
+                    ys = c[1] + radii_local * np.sin(angles)
+                    pts_local = np.stack([xs, ys], axis=1)
+                    # Keep only points inside unit square
+                    pts_local = pts_local[(pts_local[:,0]>=0) & (pts_local[:,0]<=1) & (pts_local[:,1]>=0) & (pts_local[:,1]<=1)]
+                    local_pts_list.append(pts_local)
+            if local_pts_list:
+                pts = np.vstack([pts] + local_pts_list)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # For first circle pick max radius limited by borders
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by borders
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-8))
+    return np.array(centers), np.array(radii)
+
+def compute_radius_at(i, centers, radii):
+    """
+    Compute maximal radius for circle i given others fixed.
+    """
+    x,y = centers[i]
+    r = min(x, y, 1-x, 1-y)
+    if len(centers) > 1:
+        others = np.delete(centers, i, axis=0)
+        rads = np.delete(radii, i)
+        d = np.linalg.norm(others - centers[i], axis=1) - rads
+        r = min(r, d.min())
+    return max(r, 0.0)
+
+def adaptive_simulated_annealing(centers, radii, iters=18000, T0=0.07, Tend=1e-5, seed=1):
+    """
+    Simulated annealing with adaptive temperature decay and hybrid moves:
+    - Single circle moves most iterations.
+    - Occasionally multi-circle coordinated moves to escape local minima.
+    - Temperature decays smoothly but adaptively slows if improvements are frequent.
+    """
+    rnd = np.random.RandomState(seed)
+    n = centers.shape[0]
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_sum = radii.sum()
+
+    curr_centers = centers.copy()
+    curr_radii = radii.copy()
+    curr_sum = best_sum
+    T = T0
+    decay_base = (Tend / T0) ** (1.0 / iters)
+
+    multi_prob = 0.07
+    multi_count = 3
+    step_scale = 0.018
+
+    stagnation = 0
+    stagnation_limit = 200
+
+    for it in range(iters):
+        # Adaptive decay: slow down if recent stagnation low
+        if stagnation < stagnation_limit:
+            T = max(T * decay_base, Tend)
+        else:
+            # accelerate cooling after stagnation limit
+            T = max(T * (decay_base ** 3), Tend)
+
+        if rnd.rand() < multi_prob:
+            idxs = rnd.choice(n, multi_count, replace=False)
+            old_ps = curr_centers[idxs].copy()
+            old_rs = curr_radii[idxs].copy()
+            steps = rnd.randn(multi_count, 2) * step_scale
+            new_ps = old_ps + steps
+            new_ps = np.clip(new_ps, 0.0, 1.0)
+            curr_centers[idxs] = new_ps
+            new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
+            if (new_rs > 1e-8).all():
+                new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[idxs] = new_rs
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                        stagnation = 0
+                    else:
+                        stagnation += 1
+                else:
+                    curr_centers[idxs] = old_ps
+                    stagnation += 1
+            else:
+                curr_centers[idxs] = old_ps
+                stagnation += 1
+        else:
+            i = rnd.randint(n)
+            old_p = curr_centers[i].copy()
+            old_r = curr_radii[i]
+            step = rnd.randn(2) * step_scale
+            new_p = old_p + step
+            new_p = np.clip(new_p, 0.0, 1.0)
+            curr_centers[i] = new_p
+            new_r = compute_radius_at(i, curr_centers, curr_radii)
+            if new_r <= 1e-8:
+                curr_centers[i] = old_p
+                stagnation += 1
+            else:
+                new_sum = curr_sum - old_r + new_r
+                delta = new_sum - curr_sum
+                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+                    curr_radii[i] = new_r
+                    curr_sum = new_sum
+                    if curr_sum > best_sum:
+                        best_sum = curr_sum
+                        best_centers[:] = curr_centers
+                        best_radii[:] = curr_radii
+                        stagnation = 0
+                    else:
+                        stagnation += 1
+                else:
+                    curr_centers[i] = old_p
+                    stagnation += 1
+
+    return best_centers, best_radii
+
+def local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25):
+    """
+    After annealing, perform a local greedy repacking sweep:
+    For each circle, sample candidates around current position and pick best feasible.
+    """
+    c = centers.copy()
+    n = c.shape[0]
+    for sweep in range(n_sweeps):
+        for i in range(n):
+            candidates = []
+            fixed = np.delete(c, i, axis=0)
+            fixed_r = np.delete(radii, i)
+            # Include current position as candidate
+            samples = [c[i]]
+            # Local random perturbations around current position
+            for _ in range(local_samples):
+                offset = 0.05 * (np.random.rand(2) - 0.5)
+                candidate = c[i] + offset
+                candidate = np.clip(candidate, 0.0, 1.0)
+                samples.append(candidate)
+            best_r, best_pos = -1, None
+            for s in samples:
+                r_max = min(s[0], s[1], 1-s[0], 1-s[1])
+                dists = np.linalg.norm(fixed - s, axis=1) - fixed_r
+                min_dist = dists.min() if dists.size > 0 else 1.0
+                r_cand = min(r_max, min_dist)
+                if r_cand > best_r:
+                    best_r = r_cand
+                    best_pos = s
+            if best_r > 0:
+                c[i] = best_pos
+                radii[i] = best_r
+    # Recompute final radii for consistency
+    for i in range(n):
+        radii[i] = compute_radius_at(i, c, radii)
+    return c, radii
+
+def construct_packing():
+    """
+    Construct 26-circle packing with multi-scale greedy initialization,
+    adaptive simulated annealing refinement, and final local greedy repacking.
+    """
+    n = 26
+    centers, radii = multi_scale_greedy_initial(n, base_samples=6000, local_samples=30, seed=42)
+    centers, radii = adaptive_simulated_annealing(centers, radii,
+                                                  iters=18000,
+                                                  T0=0.07,
+                                                  Tend=1e-5,
+                                                  seed=999)
+    centers, radii = local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25)
+    return centers, radii
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

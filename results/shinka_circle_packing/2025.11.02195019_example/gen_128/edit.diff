@@ -1,0 +1,419 @@
+--- a/original.py
++++ b/original.py
+@@ -1,227 +1,238 @@
+ # EVOLVE-BLOCK-START
+ import numpy as np
+ import math
+-
+-def multi_scale_greedy_initial(n, base_samples=6000, local_samples=30, seed=0):
+-    """
+-    Multi-scale greedy initialization:
+-    - At each placement step, sample many random points globally.
+-    - Additionally, sample multiple local points around existing circles'
+-      edges at different scales to fill gaps.
+-    - Choose the candidate point with the largest feasible radius.
++import itertools
++
++def enhanced_greedy_initial(n,
++                            base_samples=6000,
++                            local_samples=30,
++                            gap_triple_samples=400,
++                            seed=0):
++    """
++    Greedy placement with three sample streams:
++      1) global random
++      2) multi‐scale local around existing circles
++      3) gap‐driven: circumcenters of random triples
+     """
+     rnd = np.random.RandomState(seed)
+     centers = []
+     radii = []
+     for k in range(n):
+-        # Global random samples
++        # 1) Global random points
+         pts = rnd.rand(base_samples, 2)
+-        # Local multi-scale samples around placed circles
++
+         if k > 0:
+-            arr_centers = np.array(centers)
+-            arr_radii = np.array(radii)
+-            local_pts_list = []
+-            scales = [0.015, 0.035, 0.07]  # multiple scales for gap filling
+-            for c, r in zip(arr_centers, arr_radii):
+-                for scale in scales:
+-                    angles = rnd.rand(local_samples)*2*np.pi
+-                    radii_local = r + scale + rnd.rand(local_samples)*scale*0.5
+-                    xs = c[0] + radii_local * np.cos(angles)
+-                    ys = c[1] + radii_local * np.sin(angles)
+-                    pts_local = np.stack([xs, ys], axis=1)
+-                    # Keep only points inside unit square
+-                    pts_local = pts_local[(pts_local[:,0]>=0) & (pts_local[:,0]<=1) & (pts_local[:,1]>=0) & (pts_local[:,1]<=1)]
+-                    local_pts_list.append(pts_local)
+-            if local_pts_list:
+-                pts = np.vstack([pts] + local_pts_list)
++            arr_c = np.array(centers)
++            arr_r = np.array(radii)
++            # 2) local multi‐scale around each circle
++            local = []
++            scales = [0.02, 0.05, 0.1]
++            for c, r in zip(arr_c, arr_r):
++                for s in scales:
++                    ang = rnd.rand(local_samples)*2*np.pi
++                    rl = r + s*(1 + rnd.rand(local_samples)*0.5)
++                    x = c[0] + rl*np.cos(ang)
++                    y = c[1] + rl*np.sin(ang)
++                    pts_l = np.stack([x,y],1)
++                    mask = (pts_l[:,0]>=0)&(pts_l[:,0]<=1)&(pts_l[:,1]>=0)&(pts_l[:,1]<=1)
++                    local.append(pts_l[mask])
++            if local:
++                pts = np.vstack([pts] + local)
++
++            # 3) gap‐driven: pick random triples, compute circumcenters
++            if k >= 3:
++                idxs = list(range(k))
++                # sample a few random triples
++                for (i,j,l) in rnd.choice(
++                        list(itertools.combinations(idxs,3)),
++                        size=min(gap_triple_samples,
++                                 math.comb(k,3)),
++                        replace=False):
++                    A, B, C = arr_c[i], arr_c[j], arr_c[l]
++                    # compute circumcenter
++                    d = 2*( (A[0]*(B[1]-C[1]) +
++                             B[0]*(C[1]-A[1]) +
++                             C[0]*(A[1]-B[1])) )
++                    if abs(d) < 1e-8: continue
++                    ux = ((np.dot(A,A)*(B[1]-C[1]) +
++                           np.dot(B,B)*(C[1]-A[1]) +
++                           np.dot(C,C)*(A[1]-B[1]))/d)
++                    uy = ((np.dot(A,A)*(C[0]-B[0]) +
++                           np.dot(B,B)*(A[0]-C[0]) +
++                           np.dot(C,C)*(B[0]-A[0]))/d)
++                    if 0 <= ux <= 1 and 0 <= uy <= 1:
++                        pts = np.vstack([pts, [ux, uy]])
++
++        # Evaluate all candidates
+         best_r = -1.0
+         best_p = None
+         if k == 0:
+-            # For first circle pick max radius limited by borders
+-            xs = pts[:,0]; ys = pts[:,1]
++            # only walls
++            xs, ys = pts[:,0], pts[:,1]
+             rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+             idx = np.argmax(rs)
+-            best_r = rs[idx]; best_p = pts[idx]
++            best_r, best_p = rs[idx], pts[idx]
+         else:
+-            arr_centers = np.array(centers)
+-            arr_radii = np.array(radii)
++            arr_c = np.array(centers)
++            arr_r = np.array(radii)
+             for p in pts:
+-                # radius limited by borders
+-                r = min(p[0], p[1], 1-p[0], 1-p[1])
+-                # limit by existing circles
+-                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+-                r = min(r, d.min())
++                # border‐limit
++                r0 = min(p[0], p[1], 1-p[0], 1-p[1])
++                # circle‐limit
++                d = np.linalg.norm(arr_c - p, axis=1) - arr_r
++                r1 = d.min()
++                r = min(r0, r1)
+                 if r > best_r:
+-                    best_r = r; best_p = p
++                    best_r, best_p = r, p
+         centers.append(best_p)
+-        radii.append(max(best_r, 1e-8))
++        radii.append(max(best_r,1e-8))
++
+     return np.array(centers), np.array(radii)
+ 
++
+ def compute_radius_at(i, centers, radii):
+-    """
+-    Compute maximal radius for circle i given others fixed.
+-    """
++    """Maximal radius for circle i against walls+others."""
+     x,y = centers[i]
+-    r = min(x, y, 1-x, 1-y)
+-    if len(centers) > 1:
+-        others = np.delete(centers, i, axis=0)
+-        rads = np.delete(radii, i)
+-        d = np.linalg.norm(others - centers[i], axis=1) - rads
++    r = min(x,y,1-x,1-y)
++    if len(centers)>1:
++        oth = np.delete(centers,i,0)
++        rr  = np.delete(radii,i)
++        d = np.linalg.norm(oth-centers[i],axis=1)-rr
+         r = min(r, d.min())
+-    return max(r, 0.0)
+-
+-def adaptive_simulated_annealing(centers, radii, iters=18000, T0=0.07, Tend=1e-5, seed=1):
+-    """
+-    Simulated annealing with adaptive temperature decay and hybrid moves:
+-    - Single circle moves most iterations.
+-    - Occasionally multi-circle coordinated moves to escape local minima.
+-    - Temperature decays smoothly but adaptively slows if improvements are frequent.
++    return max(r,0.0)
++
++
++def adaptive_annealing(centers, radii,
++                       iters=20000,
++                       T0=0.08,
++                       Tend=1e-5,
++                       seed=1):
++    """
++    SA with per‐circle adaptive steps:
++      step_i ∝ radii[i]/max(radii)
+     """
+     rnd = np.random.RandomState(seed)
+     n = centers.shape[0]
+-    best_centers = centers.copy()
+-    best_radii = radii.copy()
+-    best_sum = radii.sum()
+-
+-    curr_centers = centers.copy()
+-    curr_radii = radii.copy()
+-    curr_sum = best_sum
++    curr_c = centers.copy()
++    curr_r = radii.copy()
++    curr_E = curr_r.sum()
++    best_c, best_r, best_E = curr_c.copy(), curr_r.copy(), curr_E
+     T = T0
+-    decay_base = (Tend / T0) ** (1.0 / iters)
+-
+-    multi_prob = 0.07
+-    multi_count = 3
+-    step_scale = 0.018
+-
+-    stagnation = 0
+-    stagnation_limit = 200
+-
++    decay = (Tend/T0)**(1.0/iters)
++    multi_p = 0.05
+     for it in range(iters):
+-        # Adaptive decay: slow down if recent stagnation low
+-        if stagnation < stagnation_limit:
+-            T = max(T * decay_base, Tend)
++        # cooling
++        T = max(T*decay, Tend)
++        if rnd.rand()<multi_p:
++            idxs = rnd.choice(n,3,replace=False)
+         else:
+-            # accelerate cooling after stagnation limit
+-            T = max(T * (decay_base ** 3), Tend)
+-
+-        if rnd.rand() < multi_prob:
+-            idxs = rnd.choice(n, multi_count, replace=False)
+-            old_ps = curr_centers[idxs].copy()
+-            old_rs = curr_radii[idxs].copy()
+-            steps = rnd.randn(multi_count, 2) * step_scale
+-            new_ps = old_ps + steps
+-            new_ps = np.clip(new_ps, 0.0, 1.0)
+-            curr_centers[idxs] = new_ps
+-            new_rs = np.array([compute_radius_at(i, curr_centers, curr_radii) for i in idxs])
+-            if (new_rs > 1e-8).all():
+-                new_sum = curr_sum - old_rs.sum() + new_rs.sum()
+-                delta = new_sum - curr_sum
+-                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+-                    curr_radii[idxs] = new_rs
+-                    curr_sum = new_sum
+-                    if curr_sum > best_sum:
+-                        best_sum = curr_sum
+-                        best_centers[:] = curr_centers
+-                        best_radii[:] = curr_radii
+-                        stagnation = 0
+-                    else:
+-                        stagnation += 1
+-                else:
+-                    curr_centers[idxs] = old_ps
+-                    stagnation += 1
+-            else:
+-                curr_centers[idxs] = old_ps
+-                stagnation += 1
+-        else:
+-            i = rnd.randint(n)
+-            old_p = curr_centers[i].copy()
+-            old_r = curr_radii[i]
+-            step = rnd.randn(2) * step_scale
+-            new_p = old_p + step
+-            new_p = np.clip(new_p, 0.0, 1.0)
+-            curr_centers[i] = new_p
+-            new_r = compute_radius_at(i, curr_centers, curr_radii)
+-            if new_r <= 1e-8:
+-                curr_centers[i] = old_p
+-                stagnation += 1
+-            else:
+-                new_sum = curr_sum - old_r + new_r
+-                delta = new_sum - curr_sum
+-                if delta >= 0 or rnd.rand() < math.exp(delta / T):
+-                    curr_radii[i] = new_r
+-                    curr_sum = new_sum
+-                    if curr_sum > best_sum:
+-                        best_sum = curr_sum
+-                        best_centers[:] = curr_centers
+-                        best_radii[:] = curr_radii
+-                        stagnation = 0
+-                    else:
+-                        stagnation += 1
+-                else:
+-                    curr_centers[i] = old_p
+-                    stagnation += 1
+-
+-    return best_centers, best_radii
+-
+-def local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25):
+-    """
+-    After annealing, perform a local greedy repacking sweep:
+-    For each circle, sample candidates around current position and pick best feasible.
++            idxs = [rnd.randint(n)]
++        c_new = curr_c.copy()
++        # adaptive step sizes
++        maxr = curr_r.max()
++        for i in idxs:
++            scale = 0.02*(0.5 + 0.5*(curr_r[i]/maxr))
++            c_new[i] += rnd.randn(2)*scale
++        np.clip(c_new,0,1,out=c_new)
++        # recompute radii for moved circles
++        r_new = curr_r.copy()
++        for i in idxs:
++            r_new[i] = compute_radius_at(i, c_new, r_new)
++            if r_new[i]<=1e-8:
++                c_new = curr_c; r_new = curr_r; break
++        E_new = r_new.sum()
++        dE = E_new - curr_E
++        if dE>0 or rnd.rand()<math.exp(dE/T):
++            curr_c, curr_r, curr_E = c_new, r_new, E_new
++            if E_new>best_E:
++                best_c, best_r, best_E = c_new.copy(), r_new.copy(), E_new
++
++    return best_c, best_r
++
++
++def local_greedy_repack(centers, radii,
++                        n_sweeps=3,
++                        local_samples=20):
++    """
++    Sweep small local perturbations per circle, greedily re‐pick best spot.
+     """
+     c = centers.copy()
+-    n = c.shape[0]
+-    for sweep in range(n_sweeps):
++    r = radii.copy()
++    n = len(c)
++    for _ in range(n_sweeps):
+         for i in range(n):
+-            candidates = []
+-            fixed = np.delete(c, i, axis=0)
+-            fixed_r = np.delete(radii, i)
+-            # Include current position as candidate
++            fixed = np.delete(c, i, 0)
++            fr = np.delete(r, i)
+             samples = [c[i]]
+-            # Local random perturbations around current position
+             for _ in range(local_samples):
+-                offset = 0.05 * (np.random.rand(2) - 0.5)
+-                candidate = c[i] + offset
+-                candidate = np.clip(candidate, 0.0, 1.0)
+-                samples.append(candidate)
+-            best_r, best_pos = -1, None
+-            for s in samples:
+-                r_max = min(s[0], s[1], 1-s[0], 1-s[1])
+-                dists = np.linalg.norm(fixed - s, axis=1) - fixed_r
+-                min_dist = dists.min() if dists.size > 0 else 1.0
+-                r_cand = min(r_max, min_dist)
+-                if r_cand > best_r:
+-                    best_r = r_cand
+-                    best_pos = s
+-            if best_r > 0:
+-                c[i] = best_pos
+-                radii[i] = best_r
+-    # Recompute final radii for consistency
++                off = 0.04*(np.random.rand(2)-0.5)
++                p = np.clip(c[i]+off,0,1)
++                samples.append(p)
++            best_r,best_p=-1,None
++            for p in samples:
++                r0 = min(p[0],p[1],1-p[0],1-p[1])
++                d = np.linalg.norm(fixed-p,axis=1)-fr
++                r1 = d.min() if len(d)>0 else r0
++                rr = min(r0,r1)
++                if rr>best_r:
++                    best_r,best_p=rr,p
++            if best_r>0:
++                c[i]=best_p; r[i]=best_r
++    # finalize radii
+     for i in range(n):
+-        radii[i] = compute_radius_at(i, c, radii)
+-    return c, radii
++        r[i]=compute_radius_at(i,c,r)
++    return c,r
++
++
++def micro_adjust(centers, radii, steps=50, lr=0.015):
++    """
++    Final tiny physics‐based push:
++      repulsive pair & boundary forces, accept only valid moves.
++    """
++    c = centers.copy()
++    for _ in range(steps):
++        r = np.array([compute_radius_at(i,c,radii) for i in range(len(c))])
++        forces = np.zeros_like(c)
++        # pairwise repulsion
++        for i in range(len(c)):
++            for j in range(i+1,len(c)):
++                dv = c[j]-c[i]
++                dist = np.linalg.norm(dv)+1e-8
++                overlap = r[i]+r[j]-dist
++                if overlap>0:
++                    f = (overlap/dist)*dv
++                    forces[j]+=f; forces[i]-=f
++        # boundary repulsion
++        for i in range(len(c)):
++            x,y=c[i]
++            ri=r[i]
++            if x<ri: forces[i,0]+= (ri-x)
++            if 1-x<ri: forces[i,0]-=(ri-(1-x))
++            if y<ri: forces[i,1]+= (ri-y)
++            if 1-y<ri: forces[i,1]-=(ri-(1-y))
++        # step and clamp
++        c += lr*forces
++        np.clip(c,0,1,out=c)
++    # final radii
++    r = np.array([compute_radius_at(i,c,radii) for i in range(len(c))])
++    return c,r
++
+ 
+ def construct_packing():
+-    """
+-    Construct 26-circle packing with multi-scale greedy initialization,
+-    adaptive simulated annealing refinement, and final local greedy repacking.
+-    """
+-    n = 26
+-    centers, radii = multi_scale_greedy_initial(n, base_samples=6000, local_samples=30, seed=42)
+-    centers, radii = adaptive_simulated_annealing(centers, radii,
+-                                                  iters=18000,
+-                                                  T0=0.07,
+-                                                  Tend=1e-5,
+-                                                  seed=999)
+-    centers, radii = local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25)
+-    return centers, radii
++    n=26
++    c,r = enhanced_greedy_initial(n, seed=42)
++    c,r = adaptive_annealing(c, r, seed=999)
++    c,r = local_greedy_repack(c, r)
++    c,r = micro_adjust(c, r)
++    return c,r
+ 
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

@@ -1,0 +1,2 @@
+/home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_43/main.py:151: RuntimeWarning: divide by zero encountered in scalar divide
+  limiting = min(border_lim / radii[i], neighbor_lim / radii[i], 1.0)

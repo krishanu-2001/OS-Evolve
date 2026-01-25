@@ -1,0 +1,103 @@
+# EVOLVE-BLOCK-START
+"""Greedy corner/edge seeded local search circle packing for n=26"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Place 26 circles in a unit square by greedy seeding at corners/edges,
+    then iteratively filling largest gaps, followed by local search.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    n = 26
+    centers = []
+    # 1. Place 4 corners
+    corners = np.array([[0,0],[1,0],[1,1],[0,1]])
+    centers.extend(corners)
+    # 2. Place center
+    centers.append([0.5,0.5])
+    # 3. Place edge midpoints
+    edges = np.array([[0.5,0],[1,0.5],[0.5,1],[0,0.5]])
+    centers.extend(edges)
+    # 4. Place quarter-edge points (between center and corners)
+    q1 = np.array([[0.25,0],[0.75,0],[1,0.25],[1,0.75],[0.75,1],[0.25,1],[0,0.75],[0,0.25]])
+    centers.extend(q1)
+    # 5. Place 5 more: at 0.25,0.75 grid inside
+    grid = np.array([[0.25,0.25],[0.75,0.25],[0.75,0.75],[0.25,0.75],[0.5,0.25]])
+    centers.extend(grid)
+    centers = np.array(centers)[:n]
+
+    # 6. Greedy fill: for any remaining, place at largest empty spot
+    while len(centers) < n:
+        # Find a grid of candidate points, pick the one with largest min distance to existing
+        candidates = np.random.rand(200,2)
+        dists = np.array([np.min(np.linalg.norm(centers - c, axis=1)) for c in candidates])
+        idx = np.argmax(dists)
+        centers = np.vstack([centers, candidates[idx]])
+
+    # 7. Compute initial radii
+    radii = compute_max_radii(centers)
+
+    # 8. Local search: perturb centers to increase sum of radii
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_sum = np.sum(radii)
+    np.random.seed(42)
+    for it in range(4000):
+        # Adaptive: sometimes move 1, sometimes 2, sometimes 3
+        k = np.random.choice([1,2,3], p=[0.7,0.2,0.1])
+        idxs = np.random.choice(n, k, replace=False)
+        trial = centers.copy()
+        # Small random move, scale decays with iterations
+        scale = 0.04 * (0.995**it)
+        trial[idxs] += (np.random.randn(k,2)) * scale
+        # Keep in bounds
+        trial = np.clip(trial, 0, 1)
+        # Recompute radii
+        trial_radii = compute_max_radii(trial)
+        # Accept if strictly non-overlapping and sum improves
+        if np.all(trial_radii > 1e-6):
+            if np.sum(trial_radii) > best_sum + 1e-8:
+                centers = trial
+                radii = trial_radii
+                best_centers = trial.copy()
+                best_radii = trial_radii.copy()
+                best_sum = np.sum(trial_radii)
+    return best_centers, best_radii
+
+def compute_max_radii(centers):
+    """
+    For fixed centers, compute max radii so circles stay in [0,1]^2 and don't overlap.
+    Iterate constraints to convergence.
+    """
+    n = centers.shape[0]
+    xs, ys = centers[:,0], centers[:,1]
+    radii = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+    # Iterate until convergence
+    for _ in range(20):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i]-centers[j])
+                if radii[i]+radii[j] > d:
+                    scale = d/(radii[i]+radii[j]+1e-12)
+                    oldi, oldj = radii[i], radii[j]
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    if abs(radii[i]-oldi)>1e-8 or abs(radii[j]-oldj)>1e-8:
+                        changed = True
+        if not changed:
+            break
+    return radii
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

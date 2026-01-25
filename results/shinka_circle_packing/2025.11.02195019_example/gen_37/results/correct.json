@@ -1,0 +1,4 @@
+{
+    "correct": false,
+    "error": "Validation failed: Circle 14 (x=0.1363, y=0.1363, r=0.1368) is outside unit square."
+}

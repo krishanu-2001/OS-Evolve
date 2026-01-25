@@ -1,0 +1,157 @@
+# EVOLVE-BLOCK-START
+"""Modular hybrid circle packing optimizer for n=26"""
+
+import numpy as np
+from typing import Callable, List, Tuple
+
+class CirclePacker:
+    def __init__(
+        self,
+        n: int = 26,
+        init_methods: List[Callable[[], np.ndarray]] = None,
+        max_sweeps: int = 10,
+        tol: float = 1e-6,
+        refine_iters: int = 1000,
+        multi_center_p: float = 0.2,
+        perturb_sigma: float = 0.02,
+        T0: float = 1e-2,
+        alpha: float = 0.995,
+    ):
+        self.n = n
+        self.max_sweeps = max_sweeps
+        self.tol = tol
+        self.refine_iters = refine_iters
+        self.multi_center_p = multi_center_p
+        self.perturb_sigma = perturb_sigma
+        self.T0 = T0
+        self.alpha = alpha
+
+        # Default initializers
+        if init_methods is None:
+            self.init_methods = [
+                self._radial_layout,
+                self._hex_layout([6,5,6,5,4]),
+                self._hex_layout([5,6,5,6,4]),
+            ]
+        else:
+            self.init_methods = init_methods
+
+    def optimize(self) -> Tuple[np.ndarray, np.ndarray]:
+        best_score = -np.inf
+        best_centers = None
+        best_radii = None
+        for init in self.init_methods:
+            centers = init()
+            centers = np.clip(centers, 0.0, 1.0)
+            radii = self._compute_radii(centers)
+            c_opt, r_opt = self._refine(centers, radii)
+            score = r_opt.sum()
+            if score > best_score:
+                best_score, best_centers, best_radii = score, c_opt.copy(), r_opt.copy()
+        return best_centers, best_radii
+
+    def _compute_radii(self, centers: np.ndarray) -> np.ndarray:
+        # Border-limited radii
+        border = np.minimum.reduce([centers[:,0], centers[:,1], 1-centers[:,0], 1-centers[:,1]])
+        radii = border.copy()
+        # Iterative pairwise scaling
+        for _ in range(self.max_sweeps):
+            diff = centers[:, None, :] - centers[None, :, :]
+            D = np.linalg.norm(diff, axis=2) + np.eye(self.n)
+            sumr = radii[:, None] + radii[None, :]
+            # Compute scale matrix
+            scale = np.minimum(1.0, D / sumr)
+            min_scale = scale.min(axis=1)
+            new_r = radii * min_scale
+            if np.max(np.abs(new_r - radii)) < self.tol:
+                break
+            radii = new_r
+        return radii
+
+    def _refine(self, centers: np.ndarray, radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        best_c, best_r = centers.copy(), radii.copy()
+        best_score = radii.sum()
+        curr_c, curr_r = best_c.copy(), best_r.copy()
+        curr_score = best_score
+        T = self.T0
+        for i in range(self.refine_iters):
+            # perturb
+            c_new = curr_c.copy()
+            if np.random.rand() < self.multi_center_p:
+                # multi-center: perturb 2-3 circles
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            delta = np.random.randn(len(idx), 2) * self.perturb_sigma
+            c_new[idx] += delta
+            c_new = np.clip(c_new, 0.0, 1.0)
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+            T *= self.alpha
+        return best_c, best_r
+
+    def _radial_layout(self) -> np.ndarray:
+        # center + 8 inner + 13 outer + 4 corners
+        c = np.zeros((self.n,2))
+        c[0] = [0.5, 0.5]
+        r1, r2 = 0.28, 0.65
+        for i in range(8):
+            θ = 2*np.pi*i/8 + np.pi/16
+            c[i+1] = [0.5 + r1*np.cos(θ), 0.5 + r1*np.sin(θ)]
+        for i in range(13):
+            θ = 2*np.pi*i/13 + np.pi/13
+            c[i+9] = [0.5 + r2*np.cos(θ), 0.5 + r2*np.sin(θ)]
+        cm = 0.1
+        corners = [(cm,cm),(1-cm,cm),(cm,1-cm),(1-cm,1-cm)]
+        for idx, p in enumerate(corners, start=22):
+            c[idx] = p
+        return c
+
+    def _hex_layout(self, rows: List[int]) -> Callable[[], np.ndarray]:
+        def layout() -> np.ndarray:
+            margin = 0.1
+            max_row = max(rows)
+            dx = (1-2*margin)/(max_row-1)
+            dy = dx*np.sqrt(3)/2
+            total_h = dy*(len(rows)-1)
+            y0 = (1-total_h)/2
+            pts = []
+            for i, cnt in enumerate(rows):
+                y = y0 + i*dy
+                row_w = dx*(cnt-1)
+                x0 = (1-row_w)/2
+                xs = x0 + np.arange(cnt)*dx
+                for x in xs:
+                    pts.append((x,y))
+            arr = np.array(pts)
+            # if more points than n, truncate; if fewer, pad random
+            if len(arr)>self.n:
+                return arr[:self.n]
+            elif len(arr)<self.n:
+                pad = np.random.rand(self.n-len(arr),2)*(1-2*margin)+margin
+                return np.vstack([arr,pad])
+            return arr
+        return layout
+
+def construct_packing() -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Construct a 26‐circle packing in a unit square.
+    Returns centers (26×2 array) and radii (length 26 array).
+    """
+    packer = CirclePacker()
+    return packer.optimize()
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

@@ -1,0 +1,49 @@
+<NAME>
+hybrid_outer_ring_with_corners</NAME>
+<DESCRIPTION>
+Replace the rigid 16-circle outer ring with a 13-circle ring at a reduced radius plus four fixed corner circles. This hybrid arrangement is designed to improve packing by allocating dedicated space in the square corners while evenly distributing the remaining circles along an optimally sized ring. The reduction of outer_radius to 0.65 and phase shift avoids overlap with corner circles and improves overall sum of radii.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    # Place 16 more circles in an outer ring
+    for i in range(16):
+        angle = 2 * np.pi * i / 16
+        centers[i + 9] = [0.5 + 0.7 * np.cos(angle), 0.5 + 0.7 * np.sin(angle)]
+=======
+    # Place 13 circles in an outer ring, optimized for edges
+    outer_radius = 0.65
+    for i in range(13):
+        angle = 2 * np.pi * i / 13 + np.pi/13  # phase shifted to avoid corner conflicts
+        centers[i + 9] = [0.5 + outer_radius * np.cos(angle), 0.5 + outer_radius * np.sin(angle)]
+    # Place 4 fixed corner circles for edge optimization
+    corner_margin = 0.1
+    corner_coords = [
+        [corner_margin, corner_margin],
+        [1 - corner_margin, corner_margin],
+        [corner_margin, 1 - corner_margin],
+        [1 - corner_margin, 1 - corner_margin]
+    ]
+    for idx, coord in enumerate(corner_coords, start=22):
+        centers[idx] = coord
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+optimized_inner_ring_radius_and_phase</NAME>
+<DESCRIPTION>
+Introduce an optimized inner ring radius of 0.28 and apply a slight phase shift to the 8-circle inner ring. This shifts circles away from rigid alignments and allows for more uniform spacing, increasing the achievable radii after overlap resolution.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    # Place 8 circles around it in a ring
+    for i in range(8):
+        angle = 2 * np.pi * i / 8
+        centers[i + 1] = [0.5 + 0.3 * np.cos(angle), 0.5 + 0.3 * np.sin(angle)]
+=======
+    # Place 8 circles around center in a ring with optimized radius
+    inner_radius = 0.28
+    for i in range(8):
+        angle = 2 * np.pi * i / 8 + np.pi/16  # slight phase shift to avoid alignment
+        centers[i + 1] = [0.5 + inner_radius * np.cos(angle), 0.5 + inner_radius * np.sin(angle)]
+>>>>>>> REPLACE
+</DIFF>

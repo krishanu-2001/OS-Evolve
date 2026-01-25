@@ -1,0 +1,111 @@
+# EVOLVE-BLOCK-START
+"""Greedy growth with center/edge/corner seeding and variable radii for 26-circle packing."""
+
+import numpy as np
+
+def compute_pairwise_dist(centers):
+    """Compute pairwise Euclidean distances between circle centers."""
+    diff = centers[np.newaxis, :, :] - centers[:, np.newaxis, :]
+    return np.sqrt(np.sum(diff ** 2, axis=-1))
+
+def maximal_radius(center, centers, radii, margin=1e-10):
+    """Return the largest radius so circle at 'center' will not overlap with others or boundary, given others at 'centers' with 'radii'."""
+    # Distance to square boundary
+    r_edge = min(center[0], center[1], 1-center[0], 1-center[1])
+    # Distance to other circles (subtract their radii)
+    if len(centers) == 0:
+        return r_edge - margin
+    dists = np.sqrt(np.sum((centers - center)**2, axis=1))
+    r_others = dists - radii
+    return min(r_edge, np.min(r_others)) - margin
+
+def greedy_incremental_growth(n=26):
+    """
+    Place n circles in the unit square by:
+    - Placing large circles at center and strategic edge/corner points,
+    - Incrementally adding circles at remaining locations maximizing available clearance,
+    - Expanding radii greedily after each placement.
+    Returns: centers, radii
+    """
+    # First, seed "special" points: corners, center, mid-edges
+    special_points = [
+        # Corners, slightly inset
+        [0.08, 0.08],
+        [0.92, 0.08],
+        [0.92, 0.92],
+        [0.08, 0.92],
+        # Center, offset pattern for stability
+        [0.5, 0.5],
+        [0.38, 0.5],
+        [0.62, 0.5],
+        [0.5, 0.38],
+        [0.5, 0.62],
+        # Edge centers
+        [0.5, 0.08],
+        [0.5, 0.92],
+        [0.08, 0.5],
+        [0.92, 0.5],
+        # More: near corners
+        [0.22, 0.22],
+        [0.78, 0.22],
+        [0.78, 0.78],
+        [0.22, 0.78],
+    ]
+    # Start with these points
+    centers = np.array(special_points[:min(len(special_points), n)])
+    radii = np.zeros(len(centers))
+    # Fill up to n if needed
+    while len(centers) < n:
+        # Find candidate grid positions with some jitter for diversity
+        grid_N = 12
+        grid = np.linspace(0.07, 0.93, grid_N)
+        candidates = np.array([[x+np.random.uniform(-0.01,0.01), y+np.random.uniform(-0.01,0.01)]
+                               for x in grid for y in grid])
+        # Exclude those too close to existing centers
+        dists = np.sqrt(((candidates[:,None,:] - centers[None,:,:])**2).sum(axis=2))
+        mask = (dists > 0.11).all(axis=1)
+        candidates = candidates[mask]
+        if len(candidates) == 0:
+            # fallback: random inside
+            next_center = np.random.uniform(0.11, 0.89, size=2)
+        else:
+            # For each candidate, maximal possible radius
+            trial_radii = np.array([maximal_radius(
+                c, centers, radii) for c in candidates])
+            # Select candidate with largest allowed radius
+            idx = np.argmax(trial_radii)
+            next_center = candidates[idx]
+        # Add point
+        centers = np.vstack([centers, next_center])
+        radii = np.hstack([radii, 0.0])
+
+    # Now, maximize radii iteratively for all; greedy/inward relaxation
+    for it in range(6):
+        for i in range(n):
+            others = np.delete(centers, i, axis=0)
+            r_others = np.delete(radii, i)
+            radii[i] = maximal_radius(centers[i], others, r_others)
+    # Guarantee non-negative radii, clip to a tiny value if needed
+    radii[radii < 1e-5] = 1e-5
+    return centers, radii
+
+def construct_packing():
+    """
+    Constructs a greedy, growth-based variable-radius packing for n=26 circles.
+    Returns:
+        centers: np.array of shape (26,2)
+        radii: np.array of shape (26,)
+    """
+    centers, radii = greedy_incremental_growth(26)
+    return centers, radii
+
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

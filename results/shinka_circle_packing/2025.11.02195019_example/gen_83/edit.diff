@@ -1,0 +1,333 @@
+--- a/original.py
++++ b/original.py
+@@ -1,229 +1,178 @@
+ # EVOLVE-BLOCK-START
+-"""Modular stage-based scheduler for hybrid circle packing (n=26, unit square)"""
++"""Enhanced modular stage-based circle packing with adaptive heuristics (n=26)"""
+ 
+ import numpy as np
+ 
+ def construct_packing():
+-    """
+-    Top-level: runs a modular, staged optimization scheduler to find a high-sum-of-radii packing of 26 circles in [0, 1]^2.
+-    Returns: (centers, radii)
+-    """
+     n = 26
+     margin = 0.02
+     rng = np.random.default_rng(202406)
+-    # Candidate hexagon layouts to explore structural variety
+     layouts = [
+         [6,5,6,5,4],
+         [5,6,5,6,4],
+         [6,6,5,5,4],
+         [5,5,6,6,4],
+         [6,5,5,6,4]
+     ]
+-    # Stage configuration
+-    num_candidates = 15
+-    hill_iters = 1600
+-    anneal_iters = 700
+-    physics_steps = 30
+-    polish_iters = 230
+ 
+-    # ====== Stage 1: Candidate set expansion ======
+-    candidate_centers = []
+-    candidate_sums = []
+-    for _ in range(num_candidates):
+-        if rng.random() < 0.6:
+-            row_counts = layouts[rng.integers(len(layouts))]
+-            centers = _hex_layout(row_counts, n, margin, rng)
+-        else:
+-            centers = rng.uniform(margin, 1-margin, size=(n,2))
+-        radii = compute_max_radii(centers, margin)
+-        candidate_centers.append(centers)
+-        candidate_sums.append(radii.sum())
+-    # Take the best initial candidate
+-    idx = np.argmax(candidate_sums)
+-    centers = candidate_centers[idx]
++    # Stage 1: Structured initial layout
++    centers = _structured_initial(n, margin, layouts, rng)
+ 
+-    # ====== Stage 2: Hill climbing (decayed step, multi-center perturb) ======
+-    centers = _hill_climb_stage(centers, hill_iters, margin, layouts, rng)
++    # Stage 2: Physics relaxation
++    centers = _physics_relaxation(centers, margin, steps=50, rng=rng)
+ 
+-    # ====== Stage 3: Physics-inspired relaxation ======
+-    centers = _physics_stage(centers, physics_steps, margin, rng)
++    # Stage 3: Adaptive staged optimization
++    centers = _adaptive_staged_optimization(centers, margin, layouts, rng)
+ 
+-    # ====== Stage 4: Simulated Annealing ======
+-    centers = _anneal_stage(centers, anneal_iters, margin, layouts, rng)
+-
+-    # ====== Stage 5: Final local polishing (mini-annealing, high temperature, small step) ======
+-    centers = _final_polish_stage(centers, polish_iters, margin, layouts, rng)
++    # Final greedy local refinement
++    centers = _local_greedy_refinement(centers, margin, rng)
+ 
+     radii = compute_max_radii(centers, margin)
+     return centers, radii
+ 
+-# --- Stage helpers ---
+-
+-def _hex_layout(row_counts, n, margin, rng):
+-    max_cols = max(row_counts)
++def _structured_initial(n, margin, layouts, rng):
++    max_cols = max(map(len, layouts))
+     dx = (1 - 2*margin) / max_cols
+-    h  = dx * np.sqrt(3) / 2
+-    centers = np.zeros((n, 2))
++    h = dx * np.sqrt(3) / 2
++    centers = np.zeros((n,2))
+     idx = 0
+-    for rid, cnt in enumerate(row_counts):
+-        x0 = margin + (max_cols - cnt) * dx / 2
++    for rid, row in enumerate(layouts):
++        x0 = margin + (max_cols - len(row))*dx/2
+         y = margin + rid*h
+-        for c in range(cnt):
++        for c in row:
+             centers[idx] = [x0 + c*dx, y]
+             idx += 1
+-    # Center the pattern vertically if <1 in height
+-    height = h * (len(row_counts) - 1)
+-    offset = (1 - 2*margin - height) * 0.5
+-    if offset > 0:
+-        centers[:,1] += offset
+-    # Tiny jitter to avoid degenerate initial overlaps
+     centers += rng.normal(0, 0.0002, centers.shape)
++    centers = np.clip(centers, margin+0.001, 1 - margin - 0.001)
+     return centers
+ 
+-def _hill_climb_stage(centers, iters, margin, layouts, rng):
+-    n = centers.shape[0]
+-    dx = (1 - 2*margin) / max(map(len, layouts))
+-    alpha0 = dx * 0.55
+-    best_c = centers.copy()
+-    best_r = compute_max_radii(best_c, margin)
+-    best_s = best_r.sum()
+-    for t in range(iters):
+-        alpha = alpha0 * (1 - t / iters)
+-        cand_c = best_c.copy()
+-        prob = 0.47 * (1 - t/iters) + 0.11
+-        if rng.random() < prob:
+-            k = rng.integers(2, 6)
+-            idxs = rng.choice(n, size=k, replace=False)
+-            deltas = rng.uniform(-alpha, alpha, size=(k,2))
+-            cand_c[idxs] += deltas
+-        else:
+-            i = int(rng.integers(n))
+-            cand_c[i] += rng.uniform(-alpha, alpha, 2)
+-        np.clip(cand_c, margin, 1-margin, out=cand_c)
+-        cand_r = compute_max_radii(cand_c, margin)
+-        s = cand_r.sum()
+-        if s > best_s + 1e-12:
+-            best_s, best_c, best_r = s, cand_c, cand_r
+-    return best_c
+-
+-def _physics_stage(centers, steps, margin, rng):
+-    n = centers.shape[0]
++def _physics_relaxation(centers, margin, steps, rng):
+     c = centers.copy()
+-    r = compute_max_radii(c, margin)
+     for _ in range(steps):
+         forces = np.zeros_like(c)
+-        # Pairwise repulsion (if overlap)
++        n = c.shape[0]
++        rads = compute_max_radii(c, margin)
++        # Pairwise repulsion
+         for i in range(n):
+             for j in range(i+1, n):
+                 dv = c[j] - c[i]
+                 dist = np.linalg.norm(dv)
+-                min_d = r[i] + r[j] + 1e-6
++                min_d = rads[i] + rads[j] + 1e-6
+                 if dist < min_d:
+-                    dirv = dv/dist if dist > 1e-8 else rng.normal(size=2)
++                    dirv = dv/dist if dist>1e-8 else rng.normal(size=2)
+                     overlap = min_d - dist
+-                    f = 0.19 * overlap * dirv
++                    f = 0.2 * overlap * dirv
+                     forces[i] -= f
+                     forces[j] += f
+-        # Boundary repulsion
++        # Boundary forces
+         for i in range(n):
+-            x, y, ri = c[i,0], c[i,1], r[i]
+-            if x - ri < margin:
+-                forces[i, 0] += 0.22 * (margin - (x-ri))
+-            if x + ri > 1-margin:
+-                forces[i, 0] -= 0.22 * ((x+ri)-(1-margin))
+-            if y - ri < margin:
+-                forces[i, 1] += 0.22 * (margin - (y-ri))
+-            if y + ri > 1-margin:
+-                forces[i, 1] -= 0.22 * ((y+ri)-(1-margin))
+-        c += 0.14 * forces
+-        np.clip(c, margin, 1-margin, out=c)
+-        r = compute_max_radii(c, margin)
++            x,y = c[i]
++            r = rads[i]
++            if x - r < margin:
++                forces[i,0] += 0.2 * (margin - (x - r))
++            if x + r > 1 - margin:
++                forces[i,0] -= 0.2 * ((x + r) - (1 - margin))
++            if y - r < margin:
++                forces[i,1] += 0.2 * (margin - (y - r))
++            if y + r > 1 - margin:
++                forces[i,1] -= 0.2 * ((y + r) - (1 - margin))
++        c += 0.15 * forces
++        np.clip(c, margin+0.001, 1 - margin - 0.001, out=c)
+     return c
+ 
+-def _anneal_stage(centers, iters, margin, layouts, rng):
+-    n = centers.shape[0]
++def _adaptive_staged_optimization(centers, margin, layouts, rng):
+     c = centers.copy()
+-    r = compute_max_radii(c, margin)
+-    e = r.sum()
+-    dx = (1 - 2*margin) / max(map(len, layouts))
+-    T0, T1 = 1.1e-2, 2.2e-4
+-    for k in range(iters):
+-        T = T0 * ((1-k/iters) + (T1/T0)*(k/iters))
+-        i = int(rng.integers(n))
+-        cand = c.copy()
+-        step = dx * (0.69 + 0.36*np.sin(k/41.9))  # small periodic vib
+-        delta = rng.uniform(-step, step, 2) * (1 - k/iters)
+-        cand[i] += delta
+-        np.clip(cand, margin, 1-margin, out=cand)
+-        cand_r = compute_max_radii(cand, margin)
+-        cand_e = cand_r.sum()
+-        dE = cand_e - e
+-        if dE > 0 or rng.random() < np.exp(dE / (T+1e-16)):
+-            c, r, e = cand, cand_r, cand_e
++    n = c.shape[0]
++    # Parameters
++    total_iters = 1500
++    # Initialize temperature schedule
++    T0, T_end = 0.012, 0.0002
++    for k in range(total_iters):
++        # Dynamic temperature
++        T = T0 * ((1 - k/total_iters) + (T_end/T0)*(k/total_iters))
++        # Decide move type
++        if rng.random() < 0.6:
++            # Multi-center move
++            k_move = rng.integers(2, 5)
++            idxs = rng.choice(n, size=k_move, replace=False)
++            delta = rng.uniform(-0.02, 0.02, size=(k_move,2)) * (1 - k/total_iters)
++            cand = c.copy()
++            cand[idxs] += delta
++        else:
++            # Single-center move
++            i = rng.integers(n)
++            delta = rng.uniform(-0.02, 0.02, 2) * (1 - k/total_iters)
++            cand = c.copy()
++            cand[i] += delta
++        np.clip(cand, margin+0.001, 1 - margin - 0.001, out=cand)
++        rads = compute_max_radii(cand, margin)
++        s_new = np.sum(rads)
++        dE = s_new - np.sum(compute_max_radii(c, margin))
++        if dE > 0 or rng.random() < np.exp(dE / T):
++            c = cand
++        # Optional: periodically re-apply physics relaxation for local smoothing
++        if k % 300 == 0:
++            c = _physics_relaxation(c, margin, steps=20, rng=rng)
+     return c
+ 
+-def _final_polish_stage(centers, iters, margin, layouts, rng):
+-    # Mini-annealing: higher T0, decayed fast, single or paired center moves for late local optima escape
+-    n = centers.shape[0]
++def _local_greedy_refinement(centers, margin, rng):
+     c = centers.copy()
+-    r = compute_max_radii(c, margin)
+-    e = r.sum()
+-    dx = (1 - 2*margin) / max(map(len, layouts))
+-    T0, T1 = 5.5e-3, 1e-5
+-    for k in range(iters):
+-        T = T0 * ((1-k/iters) + (T1/T0)*(k/iters))
+-        cand = c.copy()
+-        if rng.random() < 0.16:
+-            # paired move
+-            idxs = rng.choice(n, size=2, replace=False)
+-            delta = rng.uniform(-dx, dx, (2,2)) * (1-k/iters)
+-            cand[idxs] += delta
+-        else:
+-            i = int(rng.integers(n))
+-            delta = rng.uniform(-dx, dx, 2) * (1-k/iters)
+-            cand[i] += delta
+-        np.clip(cand, margin, 1-margin, out=cand)
+-        cand_r = compute_max_radii(cand, margin)
+-        cand_e = cand_r.sum()
+-        dE = cand_e - e
+-        if dE > 0 or rng.random() < np.exp(dE / (T+1e-16)):
+-            c, r, e = cand, cand_r, cand_e
++    n = c.shape[0]
++    for i in range(n):
++        best_pos = c[i].copy()
++        best_rad = compute_max_radii(c, margin)[i]
++        for delta_scale in [0.01, 0.005, 0.002]:
++            for dx, dy in [(delta_scale,0), (-delta_scale,0), (0,delta_scale), (0,-delta_scale)]:
++                trial = c.copy()
++                trial[i] = np.clip(c[i] + np.array([dx,dy]), margin+0.001, 1 - margin - 0.001)
++                rads = compute_max_radii(trial, margin)
++                if rads[i] > best_rad + 1e-8:
++                    best_rad = rads[i]
++                    best_pos = trial[i]
++        c[i] = best_pos
+     return c
+ 
+ def compute_max_radii(centers, margin=0.0):
+-    """
+-    Compute the maximal radii for given (n,2) centers, no-overlap and margin.
+-    Refined: Iterates to full convergence not just fixed passes.
+-    """
+     n = centers.shape[0]
+-    radii = np.minimum.reduce([centers[:,0]-margin, centers[:,1]-margin,
+-                               1-margin-centers[:,0], 1-margin-centers[:,1]])
++    radii = np.minimum.reduce([
++        centers[:,0] - margin,
++        centers[:,1] - margin,
++        1 - centers[:,0] - margin,
++        1 - centers[:,1] - margin
++    ])
+     radii = np.clip(radii, 0, 1)
+-    for _ in range(100):
+-        old = radii.copy()
++    for _ in range(50):
++        changed = False
+         for i in range(n):
+             for j in range(i+1, n):
+                 d = np.linalg.norm(centers[i] - centers[j])
+-                if d <= 1e-10:
++                if d < 1e-8:
+                     if radii[i]>0 or radii[j]>0:
+                         radii[i]=radii[j]=0.0
+                 else:
+                     ri, rj = radii[i], radii[j]
+                     if ri + rj > d:
+-                        scale = d / (ri + rj)
++                        scale = d / (ri + rj + 1e-12)
++                        old_i, old_j = radii[i], radii[j]
+                         radii[i] *= scale
+                         radii[j] *= scale
+-        if np.max(np.abs(radii-old)) < 1e-7:
++                        if abs(radii[i]-old_i)>1e-8 or abs(radii[j]-old_j)>1e-8:
++                            changed = True
++        if not changed:
+             break
+     return radii
+ 
++# --- Main run ---
++def run_packing():
++    centers, radii = construct_packing()
++    return centers, radii, np.sum(radii)
+ # EVOLVE-BLOCK-END
+ 
+ 
+ # This part remains fixed (not evolved)
+ def run_packing():
+     """Run the circle packing constructor for n=26"""
+     centers, radii = construct_packing()
+     # Calculate the sum of radii
+     sum_radii = np.sum(radii)
+     return centers, radii, sum_radii

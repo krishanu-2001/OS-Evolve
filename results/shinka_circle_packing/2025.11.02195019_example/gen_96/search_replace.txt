@@ -1,0 +1,104 @@
+<NAME>
+add_local_sampling_after_refinement
+</NAME>
+
+<DESCRIPTION>
+Implement an additional local sampling and repositioning step after the existing refinement to better fill small gaps and improve circle placement. This involves, for each circle, performing multiple local position and size trials within a small neighborhood, then selecting the candidate that maximizes the circle's radius while avoiding overlaps. This targeted step can help escape local minima and increase the total sum of radii.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _refine(self,
+                centers: np.ndarray,
+                radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Simulated-annealing style refinement + final force relaxation"""
+        best_c = centers.copy()
+        best_r = radii.copy()
+        best_score = best_r.sum()
+        curr_c, curr_r, curr_score = best_c.copy(), best_r.copy(), best_score
+        T = self.T0
+        stagnation = 0
+
+        for _ in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+            T *= self.alpha
+
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+        return best_c, best_r
+=======
+    def _refine(self,
+                centers: np.ndarray,
+                radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Simulated-annealing style refinement + final force relaxation"""
+        best_c = centers.copy()
+        best_r = radii.copy()
+        best_score = best_r.sum()
+
+        curr_c = best_c.copy()
+        curr_r = best_r.copy()
+        curr_score = best_score
+
+        T = self.T0
+        stagnation = 0
+
+        for _ in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+            T *= self.alpha
+
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+
+        # Additional local sampling to improve fill
+        c_local, r_local = self._local_sampling_refinement(best_c, best_r, n_trials=20, radius=0.05)
+        if r_local.sum() > best_r.sum():
+            best_c, best_r = c_local, r_local
+
+        return best_c, best_r
+>>>>>>> REPLACE

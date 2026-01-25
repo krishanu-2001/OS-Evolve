@@ -1,0 +1,122 @@
+<NAME>
+hex_lattice_initialization
+</NAME>
+
+<DESCRIPTION>
+Replace the initial rectangular grid initialization with a dense hexagonal lattice seeding. This hex grid better approximates the optimal local structure, reduces edge‐effect inefficiencies, and then selects the n best points by border distance before adding a small jitter.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # 1) Initialize on a coarse grid in [0.1,0.9]^2, then jitter
+    gx = np.linspace(0.1, 0.9, 6)
+    gy = np.linspace(0.1, 0.9, 5)
+    pts = np.array([(x, y) for x in gx for y in gy])
+    centers = pts[:n].copy()
+    centers += (np.random.rand(n, 2) - 0.5) * 0.02
+    centers = np.clip(centers, 0.01, 0.99)
+=======
+    # 1) Initialize on a hexagonal lattice in [0.05,0.95]^2, pick n best by border distance, then jitter
+    m = int(np.ceil(np.sqrt(n/0.866)))  # estimate rows needed for hex density
+    dx = 0.9 / (m - 1)
+    dy = dx * np.sqrt(3) / 2
+    hex_pts = []
+    for i in range(m):
+        for j in range(m):
+            x = 0.05 + j * dx + (i % 2) * (dx / 2)
+            y = 0.05 + i * dy
+            if x <= 0.95 and y <= 0.95:
+                hex_pts.append((x, y))
+    hex_pts = np.array(hex_pts)
+    # score by distance to borders
+    d_border = np.minimum.reduce([hex_pts, 1 - hex_pts], axis=0).min(axis=1)
+    idx = np.argsort(-d_border)[:n]
+    centers = hex_pts[idx].copy()
+    # jitter to break symmetry
+    centers += (np.random.rand(n, 2) - 0.5) * 0.02
+    centers = np.clip(centers, 0.01, 0.99)
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+radii_relaxation_convergence
+</NAME>
+
+<DESCRIPTION>
+Enhance `compute_max_radii` by extending the number of relaxation passes and introducing a convergence criterion. This ensures the radii are fully relaxed under pairwise constraints, yielding more accurate maximal radii.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    for _ in range(5):
+        for i in range(n):
+            for j in range(i + 1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1])
+                max_sum = radii[i] + radii[j]
+                if max_sum > dist:
+                    scale = dist / max_sum
+                    radii[i] *= scale
+                    radii[j] *= scale
+    return radii
+=======
+    # Relax pairwise constraints until convergence
+    for _ in range(50):
+        max_change = 0.0
+        for i in range(n):
+            for j in range(i + 1, n):
+                dxy = centers[i] - centers[j]
+                dist = np.hypot(dxy[0], dxy[1])
+                max_sum = radii[i] + radii[j]
+                if max_sum > dist and dist > 1e-12:
+                    scale = dist / max_sum
+                    old_i, old_j = radii[i], radii[j]
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    max_change = max(max_change, abs(radii[i] - old_i), abs(radii[j] - old_j))
+        if max_change < 1e-6:
+            break
+    return radii
+>>>>>>> REPLACE
+</DIFF>
+
+<NAME>
+post_relaxation_simulated_annealing
+</NAME>
+
+<DESCRIPTION>
+Add a final localized simulated annealing phase after the force‐based inflate‐and‐relax loop to escape shallow local minima and capture further incremental improvements in the sum of radii.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+        alpha *= 0.995
+
+    return centers, radii
+=======
+        alpha *= 0.995
+
+    # 3) Final simulated annealing to escape shallow local minima
+    T0 = 0.001
+    centers_sa = centers.copy()
+    radii_sa = radii.copy()
+    sum_sa = radii_sa.sum()
+    for k in range(2000):
+        i = np.random.randint(n)
+        old_pos = centers_sa[i].copy()
+        # decaying perturbation
+        delta = np.random.randn(2) * (0.005 * (1 - k / 2000))
+        centers_sa[i] = np.clip(centers_sa[i] + delta, 0.01, 0.99)
+        radii_tmp = compute_max_radii(centers_sa)
+        sum_new = radii_tmp.sum()
+        T = T0 * (1 - k / 2000)
+        if sum_new > sum_sa or np.random.rand() < np.exp((sum_new - sum_sa) / max(T, 1e-12)):
+            sum_sa = sum_new
+            radii_sa = radii_tmp
+        else:
+            centers_sa[i] = old_pos
+    centers, radii = centers_sa, radii_sa
+
+    return centers, radii
+>>>>>>> REPLACE
+</DIFF>

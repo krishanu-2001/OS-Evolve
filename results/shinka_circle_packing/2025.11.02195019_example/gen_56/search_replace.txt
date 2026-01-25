@@ -1,0 +1,144 @@
+<NAME>
+hybrid_greedy_local_sampling_init
+</NAME>
+
+<DESCRIPTION>
+The current candidate initialization phase uses either a hexagonal pattern or a purely global random sampling. However, as seen in the best prior programs, greedy sequential placement with local sampling around existing circles can yield better initial configurations by exploiting both global and local voids. I propose to add a new initialization mode (20% chance) where the centers are initialized via a greedy process: each new circle is placed at the point maximizing its feasible radius, sampling both globally and locally near existing circles' peripheries. This hybrid greedy-local sampling can yield denser, more diverse initial packings, which downstream optimization can further improve. This is a targeted and computationally efficient enhancement at the crucial first stage.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    candidate_centers = []
+    candidate_sums = []
+    for _ in range(num_candidates):
+        if rng.random() < 0.6:
+            row_counts = layouts[rng.integers(len(layouts))]
+            centers = _hex_layout(row_counts, n, margin, rng)
+        else:
+            centers = rng.uniform(margin, 1-margin, size=(n,2))
+        radii = compute_max_radii(centers, margin)
+        candidate_centers.append(centers)
+        candidate_sums.append(radii.sum())
+=======
+    candidate_centers = []
+    candidate_sums = []
+    for _ in range(num_candidates):
+        mode = rng.random()
+        if mode < 0.6:
+            row_counts = layouts[rng.integers(len(layouts))]
+            centers = _hex_layout(row_counts, n, margin, rng)
+        elif mode < 0.8:
+            centers = rng.uniform(margin, 1-margin, size=(n,2))
+        else:
+            centers = _greedy_local_sampling_init(n, margin, rng)
+        radii = compute_max_radii(centers, margin)
+        candidate_centers.append(centers)
+        candidate_sums.append(radii.sum())
+>>>>>>> REPLACE
+
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+def compute_max_radii(centers, margin=0.0):
+    """
+    Compute the maximal radii for given (n,2) centers, no-overlap and margin.
+    Refined: Iterates to full convergence not just fixed passes.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([centers[:,0]-margin, centers[:,1]-margin,
+                               1-margin-centers[:,0], 1-margin-centers[:,1]])
+    radii = np.clip(radii, 0, 1)
+    for _ in range(100):
+        old = radii.copy()
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d <= 1e-10:
+                    if radii[i]>0 or radii[j]>0:
+                        radii[i]=radii[j]=0.0
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        radii[i] *= scale
+                        radii[j] *= scale
+        if np.max(np.abs(radii-old)) < 1e-7:
+            break
+    return radii
+
+# EVOLVE-BLOCK-END
+=======
+def _greedy_local_sampling_init(n, margin, rng, global_samples=1200, local_samples=300):
+    """
+    Greedy sequential placement: each circle placed to maximize its feasible radius,
+    sampling both globally and near existing circles' peripheries.
+    """
+    centers = []
+    radii = []
+    for k in range(n):
+        pts = []
+        # global random samples
+        pts.append(rng.uniform(margin, 1-margin, size=(global_samples, 2)))
+        if k > 0:
+            arr = np.array(centers)
+            arr_r = np.array(radii)
+            # For each existing circle, sample points near its boundary
+            for ci, ri in zip(arr, arr_r):
+                angles = rng.uniform(0, 2*np.pi, local_samples//k)
+                offset = ri + rng.uniform(0.01, 0.07, size=angles.shape)
+                local_pts = ci + np.stack([np.cos(angles), np.sin(angles)], axis=1) * offset[:,None]
+                local_pts = np.clip(local_pts, margin, 1-margin)
+                pts.append(local_pts)
+        pts = np.concatenate(pts, axis=0)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs-margin, ys-margin, 1-margin-xs, 1-margin-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr = np.array(centers)
+            arr_r = np.array(radii)
+            for p in pts:
+                r = np.min([p[0]-margin, p[1]-margin, 1-margin-p[0], 1-margin-p[1]])
+                d = np.linalg.norm(arr - p, axis=1) - arr_r
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+    return np.array(centers)
+
+def compute_max_radii(centers, margin=0.0):
+    """
+    Compute the maximal radii for given (n,2) centers, no-overlap and margin.
+    Refined: Iterates to full convergence not just fixed passes.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([centers[:,0]-margin, centers[:,1]-margin,
+                               1-margin-centers[:,0], 1-margin-centers[:,1]])
+    radii = np.clip(radii, 0, 1)
+    for _ in range(100):
+        old = radii.copy()
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d <= 1e-10:
+                    if radii[i]>0 or radii[j]>0:
+                        radii[i]=radii[j]=0.0
+                else:
+                    ri, rj = radii[i], radii[j]
+                    if ri + rj > d:
+                        scale = d / (ri + rj)
+                        radii[i] *= scale
+                        radii[j] *= scale
+        if np.max(np.abs(radii-old)) < 1e-7:
+            break
+    return radii
+
+# EVOLVE-BLOCK-END
+>>>>>>> REPLACE
+
+</DIFF>

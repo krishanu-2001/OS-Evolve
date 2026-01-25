@@ -1,0 +1,82 @@
+<NAME>
+add_local_greedy_repack_phase
+</NAME>
+
+<DESCRIPTION>
+Add a final local greedy repacking phase after simulated annealing. This phase, inspired by the best-performing prior programs, iteratively perturbs each circle locally and greedily maximizes its radius, helping to resolve small overlaps and fill local gaps that annealing may miss. This hybrid approach is known to yield denser packings and higher combined scores in circle packing problems.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def construct_packing():
+    """
+    Build and optimize 26-circle packing via greedy initialization
+    followed by simulated annealing refinement.
+    """
+    n = 26
+    # Phase 1: greedy placement
+    centers, radii = greedy_initial(n, samples=8000, seed=42)
+    # Phase 2: simulated annealing
+    centers, radii = simulated_annealing(centers, radii,
+                                         iters=15000,
+                                         T0=0.05,
+                                         Tend=1e-5,
+                                         seed=999)
+    return centers, radii
+=======
+def local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25):
+    """
+    After annealing, perform a local greedy repacking sweep:
+    For each circle, sample candidates around current position and pick best feasible.
+    """
+    c = centers.copy()
+    n = c.shape[0]
+    for sweep in range(n_sweeps):
+        for i in range(n):
+            fixed = np.delete(c, i, axis=0)
+            fixed_r = np.delete(radii, i)
+            # Include current position as candidate
+            samples = [c[i]]
+            # Local random perturbations around current position
+            for _ in range(local_samples):
+                offset = 0.05 * (np.random.rand(2) - 0.5)
+                candidate = c[i] + offset
+                candidate = np.clip(candidate, 0.0, 1.0)
+                samples.append(candidate)
+            best_r, best_pos = -1, None
+            for s in samples:
+                r_max = min(s[0], s[1], 1-s[0], 1-s[1])
+                dists = np.linalg.norm(fixed - s, axis=1) - fixed_r
+                min_dist = dists.min() if dists.size > 0 else 1.0
+                r_cand = min(r_max, min_dist)
+                if r_cand > best_r:
+                    best_r = r_cand
+                    best_pos = s
+            if best_r > 0:
+                c[i] = best_pos
+                radii[i] = best_r
+    # Recompute final radii for consistency
+    for i in range(n):
+        radii[i] = compute_radius_at(i, c, radii)
+    return c, radii
+
+def construct_packing():
+    """
+    Build and optimize 26-circle packing via greedy initialization,
+    simulated annealing refinement, and final local greedy repacking.
+    """
+    n = 26
+    # Phase 1: greedy placement
+    centers, radii = greedy_initial(n, samples=8000, seed=42)
+    # Phase 2: simulated annealing
+    centers, radii = simulated_annealing(centers, radii,
+                                         iters=15000,
+                                         T0=0.05,
+                                         Tend=1e-5,
+                                         seed=999)
+    # Phase 3: local greedy repacking
+    centers, radii = local_greedy_repack(centers, radii, n_sweeps=3, local_samples=25)
+    return centers, radii
+>>>>>>> REPLACE
+
+</DIFF>

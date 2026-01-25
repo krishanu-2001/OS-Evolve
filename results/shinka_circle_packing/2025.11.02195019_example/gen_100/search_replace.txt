@@ -1,0 +1,169 @@
+<adaptive_annealing_cluster_move_frequency>
+<DESCRIPTION>
+Increase the frequency of cluster moves in the adaptive simulated annealing phase from 25% to 40%. Cluster moves allow coordinated adjustments of neighboring circles, which can help escape local minima more effectively and improve packing density. This change leverages insight #4 and #3 by enhancing the optimization routine's ability to explore the solution space more broadly while maintaining local search strengths.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        # Decide cluster or single move
+        if rng.uniform() < 0.25:
+            # Cluster move: select a random circle and move it and its neighbors
+            idx = rng.integers(n)
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+            # limit cluster size to max 4
+            if len(neighbors) > 4:
+                neighbors = rng.choice(neighbors, size=4, replace=False)
+            step_size = 0.02 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+        else:
+            # Single circle move
+            idx = rng.integers(n)
+            step_size = 0.03 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            candidate_centers[idx] += delta
+            candidate_centers[idx] = np.clip(candidate_centers[idx], margin, 1 - margin)
+=======
+        # Decide cluster or single move
+        if rng.uniform() < 0.40:
+            # Cluster move: select a random circle and move it and its neighbors
+            idx = rng.integers(n)
+            neighbors = tree.query_ball_point(current_centers[idx], r=0.15)
+            # limit cluster size to max 4
+            if len(neighbors) > 4:
+                neighbors = rng.choice(neighbors, size=4, replace=False)
+            step_size = 0.02 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            for i in neighbors:
+                candidate_centers[i] += delta
+                candidate_centers[i] = np.clip(candidate_centers[i], margin, 1 - margin)
+        else:
+            # Single circle move
+            idx = rng.integers(n)
+            step_size = 0.03 * (T / T_init)**0.5
+            delta = rng.uniform(-step_size, step_size, size=2)
+            candidate_centers[idx] += delta
+            candidate_centers[idx] = np.clip(candidate_centers[idx], margin, 1 - margin)
+>>>>>>> REPLACE
+</DIFF>
+
+<local_repacking_step_size_increase>
+<DESCRIPTION>
+Increase the step size in the local greedy repacking sweep from 0.01 to 0.015. A slightly larger step size allows the local search to explore a wider neighborhood around each circle, potentially finding better local improvements in radius sum. This aligns with insight #4 and #7 by refining the local optimization phase to better adjust circle positions.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    max_local_iters = 2000
+    step = 0.01
+
+    for _ in range(max_local_iters):
+        improved = False
+        for i in range(n):
+            base_center = centers[i].copy()
+            base_radii = compute_max_radii(centers)
+            base_sum = np.sum(base_radii)
+
+            # Try small random moves in 8 directions
+            directions = np.array([
+                [step,0], [-step,0], [0,step], [0,-step],
+                [step,step], [step,-step], [-step,step], [-step,-step]
+            ])
+
+            best_local_center = base_center.copy()
+            best_local_sum = base_sum
+
+            for d in directions:
+                new_center = base_center + d
+                new_center = np.clip(new_center, margin, 1 - margin)
+                centers[i] = new_center
+                new_radii = compute_max_radii(centers)
+                new_sum = np.sum(new_radii)
+                if new_sum > best_local_sum:
+                    best_local_sum = new_sum
+                    best_local_center = new_center.copy()
+
+            centers[i] = best_local_center
+            if best_local_sum > base_sum + 1e-8:
+                improved = True
+
+        if not improved:
+            break
+
+    radii = compute_max_radii(centers)
+    return centers, radii
+=======
+    max_local_iters = 2000
+    step = 0.015
+
+    for _ in range(max_local_iters):
+        improved = False
+        for i in range(n):
+            base_center = centers[i].copy()
+            base_radii = compute_max_radii(centers)
+            base_sum = np.sum(base_radii)
+
+            # Try small random moves in 8 directions
+            directions = np.array([
+                [step,0], [-step,0], [0,step], [0,-step],
+                [step,step], [step,-step], [-step,step], [-step,-step]
+            ])
+
+            best_local_center = base_center.copy()
+            best_local_sum = base_sum
+
+            for d in directions:
+                new_center = base_center + d
+                new_center = np.clip(new_center, margin, 1 - margin)
+                centers[i] = new_center
+                new_radii = compute_max_radii(centers)
+                new_sum = np.sum(new_radii)
+                if new_sum > best_local_sum:
+                    best_local_sum = new_sum
+                    best_local_center = new_center.copy()
+
+            centers[i] = best_local_center
+            if best_local_sum > base_sum + 1e-8:
+                improved = True
+
+        if not improved:
+            break
+
+    radii = compute_max_radii(centers)
+    return centers, radii
+>>>>>>> REPLACE
+</DIFF>
+
+<hex_cluster_radius_adjustment>
+<DESCRIPTION>
+Reduce the radius parameter in the hexagonal cluster initialization from 0.3 to 0.25. This tighter cluster near the center allows placing smaller circles more densely, which can improve overall packing by better filling the center area and complementing larger circles near edges and corners. This change is inspired by insight #6 and #1 about size variation and strategic placement.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+    # Place 14 smaller circles in a hexagonal cluster near center (indices 12-25)
+    cluster_centers = hex_cluster(14, center=(0.5,0.5), radius=0.3, margin=margin)
+    centers[12:] = cluster_centers
+=======
+    # Place 14 smaller circles in a hexagonal cluster near center (indices 12-25)
+    cluster_centers = hex_cluster(14, center=(0.5,0.5), radius=0.25, margin=margin)
+    centers[12:] = cluster_centers
+>>>>>>> REPLACE
+</DIFF>
+
+<adaptive_temperature_restart_threshold>
+<DESCRIPTION>
+Lower the stagnation threshold for temperature restart in simulated annealing from 1000 to 600 iterations. This allows the algorithm to escape local minima more quickly by reheating earlier, potentially improving exploration and final packing quality. This modification is consistent with insight #4 about the importance of the optimization routine and adaptive annealing schedules.
+</DESCRIPTION>
+<DIFF>
+<<<<<<< SEARCH
+        # Restart temperature if stagnation too long to escape local minima
+        if stagnation > 1000:
+            T = T_init
+            stagnation = 0
+=======
+        # Restart temperature if stagnation too long to escape local minima
+        if stagnation > 600:
+            T = T_init
+            stagnation = 0
+>>>>>>> REPLACE
+</DIFF>

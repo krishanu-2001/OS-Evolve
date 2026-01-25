@@ -1,0 +1,255 @@
+# EVOLVE-BLOCK-START
+"""Voronoi relaxation + evolutionary search for n=26 circle packing"""
+
+import numpy as np
+from scipy.spatial import Voronoi
+
+def construct_packing():
+    """
+    Pack 26 circles in a unit square using Voronoi-based relaxation,
+    evolutionary search, and a final local greedy repack.
+    Returns:
+        centers: np.array (26,2)
+        radii:   np.array (26,)
+    """
+    n = 26
+    pop_size = 16
+    generations = 60
+    relax_steps = 8
+    rng = np.random.default_rng(42)
+
+    # --- Phase 1: Voronoi-seeded initialization ---
+    population = []
+    for _ in range(pop_size):
+        # Classic seeds: corners, center, edge midpoints, grid, plus randoms
+        centers = []
+        centers.extend([[0,0],[1,0],[1,1],[0,1],[0.5,0.5]])
+        centers.extend([[0.5,0],[1,0.5],[0.5,1],[0,0.5]])
+        centers.extend([[0.25,0.25],[0.75,0.25],[0.75,0.75],[0.25,0.75]])
+        # Fill up to n with random points
+        while len(centers) < n:
+            centers.append(rng.uniform(0.08,0.92,2))
+        centers = np.array(centers[:n])
+        # Voronoi relaxation to spread points
+        for _ in range(relax_steps):
+            centers = voronoi_relaxation(centers, bounds=(0,1,0,1))
+        population.append(centers)
+
+    # --- Phase 2: Evolutionary Voronoi Relaxation ---
+    fitness = np.zeros(pop_size)
+    radii_pop = [None]*pop_size
+    for gen in range(generations):
+        # Evaluate fitness (sum of radii)
+        for i in range(pop_size):
+            radii = compute_max_radii(population[i])
+            radii_pop[i] = radii
+            fitness[i] = np.sum(radii)
+        # Select elites
+        elite_idx = np.argsort(fitness)[-4:]
+        elites = [population[i].copy() for i in elite_idx]
+        # Generate new population
+        new_population = []
+        # Keep elites
+        for e in elites:
+            new_population.append(e.copy())
+        # Mutate elites
+        for e in elites:
+            c = e.copy()
+            idxs = rng.choice(n, size=rng.integers(2,6), replace=False)
+            c[idxs] += rng.normal(0, 0.07, size=(len(idxs),2))
+            c = np.clip(c, 0.01, 0.99)
+            # Voronoi relaxation
+            c = voronoi_relaxation(c, bounds=(0,1,0,1), steps=2)
+            new_population.append(c)
+        # Recombine pairs of elites
+        for _ in range(4):
+            a, b = rng.choice(len(elites), size=2, replace=False)
+            c = 0.5*elites[a] + 0.5*elites[b]
+            c += rng.normal(0, 0.03, size=c.shape)
+            c = np.clip(c, 0.01, 0.99)
+            c = voronoi_relaxation(c, bounds=(0,1,0,1), steps=1)
+            new_population.append(c)
+        # Add new randoms
+        for _ in range(pop_size - len(new_population)):
+            c = rng.uniform(0.08,0.92,(n,2))
+            c = voronoi_relaxation(c, bounds=(0,1,0,1), steps=relax_steps)
+            new_population.append(c)
+        population = new_population
+
+    # --- Phase 3: Final local greedy repack in Voronoi cells ---
+    # Pick best candidate
+    best_idx = np.argmax(fitness)
+    centers = population[best_idx].copy()
+    radii = compute_max_radii(centers)
+    for _ in range(3):
+        # For each circle, move to best spot in its Voronoi cell
+        vor = bounded_voronoi(centers, bounds=(0,1,0,1))
+        for i in range(n):
+            cell = vor[i]
+            if len(cell) < 3:
+                continue
+            # Sample points in cell
+            pts = sample_polygon(cell, 24, rng)
+            pts = np.vstack([pts, centers[i]])
+            best_r = 0
+            best_p = centers[i]
+            for p in pts:
+                border_r = min(p[0],p[1],1-p[0],1-p[1])
+                sep = np.linalg.norm(np.delete(centers,i,axis=0) - p, axis=1)
+                safe_sep = sep.min() if len(sep)>0 else border_r
+                cand_r = min(border_r, safe_sep)
+                if cand_r > best_r:
+                    best_r = cand_r
+                    best_p = p
+            centers[i] = best_p
+        radii = compute_max_radii(centers)
+
+    return centers, radii
+
+def voronoi_relaxation(centers, bounds, steps=1):
+    """Move each center to centroid of its bounded Voronoi cell."""
+    for _ in range(steps):
+        vor = bounded_voronoi(centers, bounds)
+        for i, cell in enumerate(vor):
+            if len(cell) < 3:
+                continue
+            centers[i] = polygon_centroid(cell)
+        centers = np.clip(centers, bounds[0]+1e-3, bounds[1]-1e-3)
+    return centers
+
+def bounded_voronoi(points, bounds):
+    """
+    Compute bounded Voronoi cells for points in [xmin,xmax,ymin,ymax].
+    Returns: list of polygons (each a list of (x,y) points).
+    """
+    # Pad with mirrored points to bound the diagram
+    xmin, xmax, ymin, ymax = bounds
+    pts = points
+    # Mirror points at boundaries
+    mirror = []
+    for dx in [-1,0,1]:
+        for dy in [-1,0,1]:
+            if dx==0 and dy==0: continue
+            mirror.append(pts + np.array([dx*(xmax-xmin), dy*(ymax-ymin)]))
+    allpts = np.vstack([pts]+mirror)
+    vor = Voronoi(allpts)
+    # For each original point, clip its region to the box
+    regions = []
+    for i in range(len(pts)):
+        region_idx = vor.point_region[i]
+        region = vor.regions[region_idx]
+        if -1 in region or len(region)==0:
+            # Unbounded, fallback to box
+            regions.append(np.array([
+                [xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin,ymax]
+            ]))
+            continue
+        poly = np.array([vor.vertices[v] for v in region])
+        # Clip to box
+        poly = clip_polygon(poly, xmin, xmax, ymin, ymax)
+        regions.append(poly)
+    return regions
+
+def clip_polygon(poly, xmin, xmax, ymin, ymax):
+    """Sutherland–Hodgman polygon clipping to box."""
+    def clip_edge(poly, edge):
+        out = []
+        for i in range(len(poly)):
+            A, B = poly[i-1], poly[i]
+            if edge(B):
+                if not edge(A):
+                    # Intersect
+                    out.append(intersect(A,B,edge))
+                out.append(B)
+            elif edge(A):
+                out.append(intersect(A,B,edge))
+        return np.array(out) if len(out)>0 else np.array([])
+    def left(p): return p[0]>=xmin
+    def right(p): return p[0]<=xmax
+    def bottom(p): return p[1]>=ymin
+    def top(p): return p[1]<=ymax
+    def intersect(A,B,edge):
+        # Find intersection of AB with the edge
+        x1,y1 = A; x2,y2 = B
+        if edge==left:
+            x = xmin
+            y = y1 + (y2-y1)*(xmin-x1)/(x2-x1+1e-12)
+        elif edge==right:
+            x = xmax
+            y = y1 + (y2-y1)*(xmax-x1)/(x2-x1+1e-12)
+        elif edge==bottom:
+            y = ymin
+            x = x1 + (x2-x1)*(ymin-y1)/(y2-y1+1e-12)
+        elif edge==top:
+            y = ymax
+            x = x1 + (x2-x1)*(ymax-y1)/(y2-y1+1e-12)
+        return np.array([x,y])
+    for edge in [left, right, bottom, top]:
+        poly = clip_edge(poly, edge)
+        if len(poly)==0:
+            break
+    return poly
+
+def polygon_centroid(poly):
+    """Centroid of a polygon (2D array of points)."""
+    x = poly[:,0]
+    y = poly[:,1]
+    a = 0.5*np.sum(x[:-1]*y[1:] - x[1:]*y[:-1])
+    if abs(a)<1e-12:
+        return np.mean(poly,axis=0)
+    cx = np.sum((x[:-1]+x[1:])*(x[:-1]*y[1:]-x[1:]*y[:-1]))/(6*a)
+    cy = np.sum((y[:-1]+y[1:])*(x[:-1]*y[1:]-x[1:]*y[:-1]))/(6*a)
+    return np.array([cx,cy])
+
+def sample_polygon(poly, n, rng):
+    """Uniformly sample n points inside a convex polygon."""
+    # Triangulate from centroid
+    centroid = np.mean(poly,axis=0)
+    pts = []
+    for i in range(len(poly)):
+        a = poly[i-1]
+        b = poly[i]
+        for _ in range(n//len(poly)+1):
+            r1, r2 = rng.uniform(0,1,2)
+            if r1+r2>1:
+                r1, r2 = 1-r1, 1-r2
+            p = (1-r1-r2)*centroid + r1*a + r2*b
+            pts.append(p)
+    pts = np.array(pts)[:n]
+    return pts
+
+def compute_max_radii(centers):
+    """
+    Given circle centers, compute the maximal non-overlapping radii
+    within the unit square by iterative constraint enforcement.
+    """
+    n = centers.shape[0]
+    xs, ys = centers[:,0], centers[:,1]
+    radii = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+    # Iteratively enforce pairwise non-overlap
+    for _ in range(20):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i]-centers[j])
+                if radii[i]+radii[j] > d:
+                    scale = d/(radii[i]+radii[j]+1e-12)
+                    oldi, oldj = radii[i], radii[j]
+                    radii[i] *= scale
+                    radii[j] *= scale
+                    if abs(radii[i]-oldi)>1e-10 or abs(radii[j]-oldj)>1e-10:
+                        changed = True
+        if not changed:
+            break
+    radii = np.clip(radii, 1e-7, 0.5)
+    return radii
+# EVOLVE-BLOCK-END
+
+
+# This part remains fixed (not evolved)
+def run_packing():
+    """Run the circle packing constructor for n=26"""
+    centers, radii = construct_packing()
+    # Calculate the sum of radii
+    sum_radii = np.sum(radii)
+    return centers, radii, sum_radii

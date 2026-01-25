@@ -1,0 +1,206 @@
+<improve_local_sampling_and_adaptive_annealing>
+Improve local sampling in greedy repacking and add adaptive annealing schedule based on stagnation.
+
+This edit enhances the greedy repacking by adding more local samples around each circle's current position and its neighbors to better fill small gaps. It also modifies the annealing schedule to adaptively slow cooling when improvements are frequent and accelerate when stagnation occurs, balancing exploration and exploitation.
+
+These changes leverage expert insights about local gap-filling and adaptive temperature control to improve packing quality.
+</improve_local_sampling_and_adaptive_annealing>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _refine(self,
+                centers: np.ndarray,
+                radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Simulated-annealing style refinement + final force relaxation"""
+        best_c = centers.copy()
+        best_r = radii.copy()
+        best_score = best_r.sum()
+        curr_c, curr_r, curr_score = best_c.copy(), best_r.copy(), best_score
+        T = self.T0
+        stagnation = 0
+
+        for _ in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                else:
+                    stagnation += 1
+            else:
+                stagnation += 1
+            T *= self.alpha
+
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+
+        # Post-processing: greedy coordinate repacking sweep
+        c_greedy, r_greedy = self._greedy_repack(best_c, best_r, n_sweeps=2)
+        if r_greedy.sum() > best_r.sum():
+            best_c, best_r = c_greedy, r_greedy
+
+        # Global uniform scaling to fill remaining gaps
+        scale = self._compute_global_scale(best_c, best_r)
+        if scale > 1.0:
+            best_r = best_r * scale
+
+        return best_c, best_r
+=======
+    def _refine(self,
+                centers: np.ndarray,
+                radii: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Simulated-annealing style refinement + final force relaxation with adaptive annealing"""
+        best_c = centers.copy()
+        best_r = radii.copy()
+        best_score = best_r.sum()
+        curr_c, curr_r, curr_score = best_c.copy(), best_r.copy(), best_score
+        T = self.T0
+        stagnation = 0
+        no_improve_count = 0
+        adapt_cool_factor = 1.0
+
+        for it in range(self.refine_iters):
+            p_multi = 0.5 if stagnation > self.stagnation_limit else 0.2
+            sigma = self.sigma_multi if stagnation > self.stagnation_limit else self.sigma_base
+            if np.random.rand() < p_multi:
+                idx = np.random.choice(self.n, size=3, replace=False)
+            else:
+                idx = [np.random.randint(self.n)]
+            c_new = curr_c.copy()
+            c_new[idx] += np.random.randn(len(idx), 2) * sigma
+            c_new = np.clip(c_new, 0.0, 1.0)
+
+            r_new = self._compute_radii(c_new)
+            score_new = r_new.sum()
+            dE = score_new - curr_score
+            if dE > 0 or np.random.rand() < np.exp(dE / T):
+                curr_c, curr_r, curr_score = c_new, r_new, score_new
+                if curr_score > best_score:
+                    best_c, best_r, best_score = curr_c.copy(), curr_r.copy(), curr_score
+                    stagnation = 0
+                    no_improve_count = 0
+                    adapt_cool_factor = max(0.5, adapt_cool_factor * 0.95)  # slow cooling on improvement
+                else:
+                    stagnation += 1
+                    no_improve_count += 1
+                    if no_improve_count > 20:
+                        adapt_cool_factor = min(2.0, adapt_cool_factor * 1.1)  # speed cooling on stagnation
+                        no_improve_count = 0
+            else:
+                stagnation += 1
+                no_improve_count += 1
+                if no_improve_count > 20:
+                    adapt_cool_factor = min(2.0, adapt_cool_factor * 1.1)
+                    no_improve_count = 0
+            T *= self.alpha ** adapt_cool_factor
+
+        # Final force-based relaxation
+        c_force, r_force = self._force_refine(best_c)
+        if r_force.sum() > best_r.sum():
+            best_c, best_r = c_force, r_force
+
+        # Post-processing: greedy coordinate repacking sweep with enhanced local sampling
+        c_greedy, r_greedy = self._greedy_repack(best_c, best_r, n_sweeps=2)
+        if r_greedy.sum() > best_r.sum():
+            best_c, best_r = c_greedy, r_greedy
+
+        # Global uniform scaling to fill remaining gaps
+        scale = self._compute_global_scale(best_c, best_r)
+        if scale > 1.0:
+            best_r = best_r * scale
+
+        return best_c, best_r
+>>>>>>> REPLACE
+
+<improve_local_sampling_and_adaptive_annealing>
+<DIFF>
+<<<<<<< SEARCH
+    def _greedy_repack(self, centers: np.ndarray, radii: np.ndarray, n_sweeps: int = 2) -> Tuple[np.ndarray, np.ndarray]:
+        # For each circle, given all others fixed, move and resize to maximize its radius
+        c = centers.copy()
+        n = c.shape[0]
+        for sweep in range(n_sweeps):
+            for i in range(n):
+                candidates = []
+                fixed = np.delete(c, i, axis=0)
+                # Try many candidate positions in a small square around old center, but also allow larger jumps
+                samples = [c[i]]  # try current as candidate
+                # Local sampling
+                for _ in range(16):
+                    offset = 0.06 * (np.random.rand(2) - 0.5)
+                    samples.append(np.clip(c[i] + offset, 0.0, 1.0))
+                # Broader region
+                for _ in range(6):
+                    samples.append(np.random.rand(2))
+                best_r, best_pos = -1, None
+                for s in samples:
+                    # max radius limited by border
+                    r_max = np.min([s[0], s[1], 1-s[0], 1-s[1]])
+                    # also limited by distance to all other centers
+                    dists = np.linalg.norm(fixed - s, axis=1)
+                    max_pair = np.min(dists)
+                    r_cand = min(r_max, max_pair) if max_pair > 0 else 0
+                    if r_cand > best_r:
+                        best_r, best_pos = r_cand, s
+                if best_r > 0:
+                    c[i] = best_pos
+        # Re-deduce radii for *final* configuration
+        r = self._compute_radii(c)
+        return c, r
+=======
+    def _greedy_repack(self, centers: np.ndarray, radii: np.ndarray, n_sweeps: int = 2) -> Tuple[np.ndarray, np.ndarray]:
+        # For each circle, given all others fixed, move and resize to maximize its radius
+        c = centers.copy()
+        n = c.shape[0]
+        for sweep in range(n_sweeps):
+            for i in range(n):
+                candidates = []
+                fixed = np.delete(c, i, axis=0)
+                # Try many candidate positions in a small square around old center, also around neighbors, plus broader jumps
+                samples = [c[i]]  # current position
+                # Local sampling around current position
+                for _ in range(20):
+                    offset = 0.06 * (np.random.rand(2) - 0.5)
+                    samples.append(np.clip(c[i] + offset, 0.0, 1.0))
+                # Local sampling around neighbors
+                dists_to_others = np.linalg.norm(fixed - c[i], axis=1)
+                neighbor_idxs = np.argsort(dists_to_others)[:3]
+                for ni in neighbor_idxs:
+                    neighbor_pos = fixed[ni]
+                    for _ in range(10):
+                        offset = 0.05 * (np.random.rand(2) - 0.5)
+                        samples.append(np.clip(neighbor_pos + offset, 0.0, 1.0))
+                # Broader region random samples
+                for _ in range(8):
+                    samples.append(np.random.rand(2))
+                best_r, best_pos = -1, None
+                for s in samples:
+                    # max radius limited by border
+                    r_max = np.min([s[0], s[1], 1-s[0], 1-s[1]])
+                    # also limited by distance to all other centers
+                    dists = np.linalg.norm(fixed - s, axis=1)
+                    max_pair = np.min(dists)
+                    r_cand = min(r_max, max_pair) if max_pair > 0 else 0
+                    if r_cand > best_r:
+                        best_r, best_pos = r_cand, s
+                if best_r > 0:
+                    c[i] = best_pos
+        # Re-deduce radii for *final* configuration
+        r = self._compute_radii(c)
+        return c, r
+>>>>>>> REPLACE

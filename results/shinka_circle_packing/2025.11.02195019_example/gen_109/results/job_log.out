@@ -1,0 +1,22 @@
+/home/yv2857/ShinkaEvolve
+Launching evaluation of function:
+_target_: examples.circle_packing.evaluate.main
+program_path: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/main.py
+results_dir: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/results
+
+Evaluating program: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/main.py
+Saving results to: /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/results
+Run 1/1 completed in 1.93 seconds
+Detailed packing data saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/results/extra.npz
+Correctness and error status saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/results/correct.json
+Metrics saved to /home/yv2857/ShinkaEvolve/results/shinka_circle_packing/2025.11.02195019_example/gen_109/results/metrics.json
+Evaluation or Validation failed: Validation failed: Circles 0 & 1 overlap. Dist: 0.1435, Sum Radii: 0.2830
+Metrics:
+  combined_score: 3.773732293144644
+  public: {'centers_str': '  centers[0] = (0.2936, 0.5185)\n  centers[1] = (0.2112, 0.6360)\n  centers[2] = (0.3265, 0.7311)\n  centers[3] = (0.2329, 0.3929)\n  centers[4] = (0.4846, 0.6451)\n  centers[5] = (0.2890, 0.1358)\n  centers[6] = (0.8093, 0.5550)\n  centers[7] = (0.7245, 0.2834)\n  centers[8] = (0.2262, 0.8570)\n  centers[9] = (0.6286, 0.4722)\n  centers[10] = (0.4124, 0.1730)\n  centers[11] = (0.8290, 0.7244)\n  centers[12] = (0.7181, 0.1407)\n  centers[13] = (0.4615, 0.4833)\n  centers[14] = (0.5695, 0.8385)\n  centers[15] = (0.1288, 0.7721)\n  centers[16] = (0.1501, 0.2776)\n  centers[17] = (0.7309, 0.8492)\n  centers[18] = (0.4559, 0.3306)\n  centers[19] = (0.3069, 0.2740)\n  centers[20] = (0.8585, 0.3353)\n  centers[21] = (0.6596, 0.6884)\n  centers[22] = (0.1505, 0.1350)\n  centers[23] = (0.5597, 0.1359)\n  centers[24] = (0.5878, 0.2703)\n  centers[25] = (0.4002, 0.8519)', 'num_circles': 26}
+  private: {'reported_sum_of_radii': 3.773732293144644}
+  execution_time_mean: 1.9286144339712337
+  execution_time_std: 0.0
+  num_valid_runs: 0
+  num_invalid_runs: 1
+  all_validation_errors: ['Circles 0 & 1 overlap. Dist: 0.1435, Sum Radii: 0.2830']

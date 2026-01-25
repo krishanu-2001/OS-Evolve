@@ -1,0 +1,138 @@
+<NAME>
+post_anneal_local_greedy_repack
+</NAME>
+
+<DESCRIPTION>
+Add a post-annealing local greedy repacking sweep: after the main optimization pipeline (hill climbing, annealing, physics), perform a final sweep where each circle is greedily repositioned (one at a time) to its locally optimal position and radius, given the fixed positions of all others. This can correct suboptimal placements left by annealing and further increase the sum of radii, as suggested by the literature and the recommendations. The sweep is performed in the PackingPipeline.run() method, after all other stages, and uses a new helper method _local_greedy_repack().
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    def run(self):
+        best_sum = -np.inf
+        best_centers = None
+        best_radii = None
+        for _ in range(self.num_restarts):
+            centers = self._initialize()
+            centers = self._hill_climb(centers)
+            centers = self._simulated_annealing(centers)
+            centers = self._physics_relax(centers)
+            radii = compute_max_radii(centers)
+            s = radii.sum()
+            if s > best_sum:
+                best_sum, best_centers, best_radii = s, centers.copy(), radii.copy()
+        return best_centers, best_radii
+=======
+    def run(self):
+        best_sum = -np.inf
+        best_centers = None
+        best_radii = None
+        for _ in range(self.num_restarts):
+            centers = self._initialize()
+            centers = self._hill_climb(centers)
+            centers = self._simulated_annealing(centers)
+            centers = self._physics_relax(centers)
+            # Post-annealing local greedy repacking sweep
+            centers = self._local_greedy_repack(centers, n_iter=2)
+            radii = compute_max_radii(centers)
+            s = radii.sum()
+            if s > best_sum:
+                best_sum, best_centers, best_radii = s, centers.copy(), radii.copy()
+        return best_centers, best_radii
+>>>>>>> REPLACE
+
+</DIFF>
+
+<DIFF>
+<<<<<<< SEARCH
+    def _physics_relax(self, centers):
+        c = centers.copy()
+        r = compute_max_radii(c)
+        for _ in range(self.physics_steps):
+            forces = np.zeros_like(c)
+            # pairwise repulsion
+            for i in range(self.n):
+                for j in range(i+1, self.n):
+                    dv = c[j] - c[i]
+                    dist = np.linalg.norm(dv)
+                    min_d = r[i] + r[j] + 1e-6
+                    if dist < min_d:
+                        dirv = dv/dist if dist>1e-8 else self.rng.normal(size=2)
+                        overlap = min_d - dist
+                        f = 0.2 * overlap * dirv
+                        forces[i] -= f
+                        forces[j] += f
+            # boundary forces
+            for i in range(self.n):
+                x,y = c[i]; ri = r[i]
+                if x - ri < self.margin: forces[i,0] += 0.2*(self.margin - (x-ri))
+                if x + ri > 1-self.margin: forces[i,0] -= 0.2*((x+ri)-(1-self.margin))
+                if y - ri < self.margin: forces[i,1] += 0.2*(self.margin - (y-ri))
+                if y + ri > 1-self.margin: forces[i,1] -= 0.2*((y+ri)-(1-self.margin))
+            c += 0.15 * forces
+            np.clip(c, self.margin, 1-self.margin, out=c)
+            r = compute_max_radii(c)
+        return c
+=======
+    def _physics_relax(self, centers):
+        c = centers.copy()
+        r = compute_max_radii(c)
+        for _ in range(self.physics_steps):
+            forces = np.zeros_like(c)
+            # pairwise repulsion
+            for i in range(self.n):
+                for j in range(i+1, self.n):
+                    dv = c[j] - c[i]
+                    dist = np.linalg.norm(dv)
+                    min_d = r[i] + r[j] + 1e-6
+                    if dist < min_d:
+                        dirv = dv/dist if dist>1e-8 else self.rng.normal(size=2)
+                        overlap = min_d - dist
+                        f = 0.2 * overlap * dirv
+                        forces[i] -= f
+                        forces[j] += f
+            # boundary forces
+            for i in range(self.n):
+                x,y = c[i]; ri = r[i]
+                if x - ri < self.margin: forces[i,0] += 0.2*(self.margin - (x-ri))
+                if x + ri > 1-self.margin: forces[i,0] -= 0.2*((x+ri)-(1-self.margin))
+                if y - ri < self.margin: forces[i,1] += 0.2*(self.margin - (y-ri))
+                if y + ri > 1-self.margin: forces[i,1] -= 0.2*((y+ri)-(1-self.margin))
+            c += 0.15 * forces
+            np.clip(c, self.margin, 1-self.margin, out=c)
+            r = compute_max_radii(c)
+        return c
+
+    def _local_greedy_repack(self, centers, n_iter=2):
+        """
+        For each circle, greedily reposition it (with all others fixed) to maximize its radius.
+        Repeat for n_iter sweeps.
+        """
+        c = centers.copy()
+        n = c.shape[0]
+        for sweep in range(n_iter):
+            for i in range(n):
+                # Fix all other centers, maximize radius for i
+                best_r = -1.0
+                best_p = c[i].copy()
+                # Sample grid and random points in allowed region
+                grid = np.linspace(self.margin, 1-self.margin, 7)
+                pts = np.array(np.meshgrid(grid, grid)).reshape(2,-1).T
+                pts = np.vstack([pts, self.rng.uniform(self.margin, 1-self.margin, size=(40,2))])
+                arr_centers = np.delete(c, i, axis=0)
+                arr_radii = compute_max_radii(arr_centers)
+                for p in pts:
+                    # wall limit
+                    r = min(p[0]-self.margin, p[1]-self.margin, 1-self.margin-p[0], 1-self.margin-p[1])
+                    # limit by existing circles
+                    d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                    if len(d) > 0:
+                        r = min(r, d.min())
+                    if r > best_r:
+                        best_r = r
+                        best_p = p
+                c[i] = best_p
+        return c
+>>>>>>> REPLACE
+
+</DIFF>

@@ -1,0 +1,74 @@
+<NAME>
+adaptive_radii_constraint
+</NAME>
+
+<DESCRIPTION>
+Implement an adaptive radius adjustment strategy based on the current minimal distances to borders and neighbors, to enhance the global optimization process. This method adaptively scales the radii after each relaxation iteration, focusing on the tightest constraints to push the radii closer to maximal values while maintaining feasibility. The idea is inspired by constraint satisfaction techniques, where the radii are regularly rescaled according to the most restrictive borders and nearest neighbors, enabling the configuration to better utilize free space dynamically.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+for _ in range(50):
+    max_change = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dxy = centers[i] - centers[j]
+            dist = np.hypot(dxy[0], dxy[1])
+            max_sum = radii[i] + radii[j]
+            if max_sum > dist and dist > 1e-12:
+                scale = dist / max_sum
+                old_i, old_j = radii[i], radii[j]
+                radii[i] *= scale
+                radii[j] *= scale
+                max_change = max(max_change, abs(radii[i] - old_i), abs(radii[j] - old_j))
+    if max_change < 1e-6:
+        break
+=======
+for _ in range(50):
+    max_change = 0.0
+    # Initialize min distances to borders and neighbors
+    min_border_dist = np.full(n, np.inf)
+    for i in range(n):
+        x, y = centers[i]
+        r = radii[i]
+        min_border_dist[i] = min(x - r, 1 - x - r, y - r, 1 - y - r)
+
+    # For neighbor distances, record minimal gap
+    min_neighbor_dist = np.full(n, np.inf)
+    for i in range(n):
+        for j in range(i + 1, n):
+            dxy = centers[i] - centers[j]
+            dist = np.hypot(dxy[0], dxy[1])
+            allow = radii[i] + radii[j]
+            gap = dist - allow
+            if gap < min_neighbor_dist[i]:
+                min_neighbor_dist[i] = gap
+            if gap < min_neighbor_dist[j]:
+                min_neighbor_dist[j] = gap
+            # Adjust radii if overlapping
+            if allow > dist and dist > 1e-12:
+                scale = dist / allow
+                old_i, old_j = radii[i], radii[j]
+                radii[i] *= scale
+                radii[j] *= scale
+                max_change = max(max_change, abs(radii[i] - old_i), abs(radii[j] - old_j))
+    # Determine the tightest constraint for each circle
+    radii_scale_factors = np.ones(n)
+    for i in range(n):
+        # Limit by border
+        border_lim = min_border_dist[i]
+        # Limit by neighbor
+        neighbor_lim = min_neighbor_dist[i]
+        # Selected minimal scaling factor
+        limiting = min(border_lim / radii[i], neighbor_lim / radii[i], 1.0)
+        if limiting < 1.0:
+            radii_scale_factors[i] = limiting
+    # Apply scaling
+    for i in range(n):
+        old_radius = radii[i]
+        radii[i] = min(radii[i], radii[i] * radii_scale_factors[i])
+        max_change = max(max_change, abs(radii[i] - old_radius))
+    if max_change < 1e-6:
+        break
+>>>>>>> REPLACE
+</DIFF>

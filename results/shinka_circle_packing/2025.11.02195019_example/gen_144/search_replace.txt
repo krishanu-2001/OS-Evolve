@@ -1,0 +1,128 @@
+<NAME>
+gap_driven_greedy_sampling
+</NAME>
+
+<DESCRIPTION>
+Introduce a gap-driven targeted sampling phase after each greedy circle placement. After each new circle is placed, analyze the current packing to find the largest local voids (gaps) using a grid-based density estimation. Perform additional high-resolution sampling specifically in these low-density regions and, if a better placement is found, update the placement for that circle. This targeted gap-filling approach is designed to more efficiently utilize the sampling budget and improve the initial packing density, particularly in the later stages, which in turn provides a stronger starting point for subsequent optimization.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+def greedy_initial(n, samples=8000, seed=0):
+    """
+    Sequentially place n circles.
+    At each step, sample 'samples' random points and pick the one
+    with the largest feasible radius given existing circles.
+    Adaptive sampling: increase samples for later circles to fill gaps better.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    base_samples = samples // 4
+    for k in range(n):
+        # Increase samples for later circles to better fill gaps
+        current_samples = base_samples + int(base_samples * (k / max(1, n-1)) * 3)
+        pts = rnd.rand(current_samples, 2)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # for first circle just pick the best by walls
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by walls
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+
+    # Local refinement step after greedy placement to improve radii
+    centers, radii = local_refinement(centers, radii, rnd)
+    return np.array(centers), np.array(radii)
+=======
+def greedy_initial(n, samples=8000, seed=0):
+    """
+    Sequentially place n circles.
+    At each step, sample 'samples' random points and pick the one
+    with the largest feasible radius given existing circles.
+    Adaptive sampling: increase samples for later circles to fill gaps better.
+    After each placement, perform gap-driven targeted sampling in the largest local voids.
+    """
+    rnd = np.random.RandomState(seed)
+    centers = []
+    radii = []
+    base_samples = samples // 4
+    grid_size = 20  # for gap map
+    for k in range(n):
+        # Increase samples for later circles to better fill gaps
+        current_samples = base_samples + int(base_samples * (k / max(1, n-1)) * 3)
+        pts = rnd.rand(current_samples, 2)
+        best_r = -1.0
+        best_p = None
+        if k == 0:
+            # for first circle just pick the best by walls
+            xs = pts[:,0]; ys = pts[:,1]
+            rs = np.minimum.reduce([xs, ys, 1-xs, 1-ys])
+            idx = np.argmax(rs)
+            best_r = rs[idx]; best_p = pts[idx]
+        else:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            for p in pts:
+                # radius limited by walls
+                r = min(p[0], p[1], 1-p[0], 1-p[1])
+                # limit by existing circles
+                d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                r = min(r, d.min())
+                if r > best_r:
+                    best_r = r; best_p = p
+        centers.append(best_p)
+        radii.append(max(best_r, 1e-6))
+
+        # --- Gap-driven targeted sampling phase ---
+        if k > 2 and k < n-1:
+            arr_centers = np.array(centers)
+            arr_radii = np.array(radii)
+            # Build a grid density map
+            gx, gy = np.meshgrid(np.linspace(0,1,grid_size), np.linspace(0,1,grid_size))
+            grid_pts = np.stack([gx.ravel(), gy.ravel()], axis=1)
+            # For each grid point, compute min distance to any circle edge
+            dists = np.full(grid_pts.shape[0], 1e9)
+            for ci, ri in zip(arr_centers, arr_radii):
+                d = np.linalg.norm(grid_pts - ci, axis=1) - ri
+                dists = np.minimum(dists, d)
+            # Mask out negative (inside a circle)
+            dists[dists<0]=0
+            # Find the grid point(s) with largest gap
+            gap_idxs = np.argpartition(-dists, 4)[:4]
+            for gap_idx in gap_idxs:
+                gap_pt = grid_pts[gap_idx]
+                # Sample around this gap
+                gap_samples = gap_pt + 0.13 * (rnd.rand(120,2) - 0.5)
+                gap_samples = np.clip(gap_samples, 0.0, 1.0)
+                for p in gap_samples:
+                    # radius limited by walls
+                    r = min(p[0], p[1], 1-p[0], 1-p[1])
+                    d = np.linalg.norm(arr_centers - p, axis=1) - arr_radii
+                    r = min(r, d.min())
+                    if r > radii[-1]:
+                        centers[-1] = p
+                        radii[-1] = r
+                        best_r = r
+                        best_p = p
+
+    # Local refinement step after greedy placement to improve radii
+    centers, radii = local_refinement(centers, radii, rnd)
+    return np.array(centers), np.array(radii)
+>>>>>>> REPLACE
+
+</DIFF>

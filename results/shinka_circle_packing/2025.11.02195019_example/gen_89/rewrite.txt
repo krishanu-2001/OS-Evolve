@@ -1,0 +1,158 @@
+# EVOLVE-BLOCK-START
+"""Enhanced hybrid initialization + adaptive hill-climbing + force relaxation for n=26"""
+
+import numpy as np
+
+def construct_packing():
+    """
+    Initialize centers on multiple hex layouts, then perform adaptive hill-climbing
+    and physics-based relaxation to maximize total radii.
+    """
+    n = 26
+    margin = 0.02
+    row_layouts = [
+        [6, 5, 6, 5, 4],
+        [5, 6, 5, 6, 4],
+        [6, 6, 5, 5, 4],
+        [5, 5, 6, 6, 4],
+        [6, 5, 5, 6, 4]
+    ]
+
+    best_sum = -1
+    best_centers = None
+    best_radii = None
+
+    for rows in row_layouts:
+        max_cols = max(rows)
+        dx = (1 - 2*margin) / max_cols
+        h = dx * np.sqrt(3) / 2
+        centers = np.zeros((n, 2))
+        idx = 0
+        for rid, cnt in enumerate(rows):
+            x0 = margin + (max_cols - cnt) * dx / 2
+            y = margin + rid * h
+            for c in range(cnt):
+                centers[idx, 0] = x0 + c * dx
+                centers[idx, 1] = y
+                idx += 1
+        radii = compute_max_radii(centers)
+        s = radii.sum()
+        if s > best_sum:
+            best_sum = s
+            best_centers = centers
+            best_radii = radii
+
+    # Hill-climbing parameters
+    iters = 6000
+    init_step = dx * 0.5
+    rng = np.random.default_rng(42)
+
+    for t in range(iters):
+        alpha = init_step * (1 - t / iters)
+        centers_candidate = best_centers.copy()
+
+        if rng.uniform() < 0.2:
+            count = rng.integers(2, 5)
+            indices = rng.choice(n, size=count, replace=False)
+            deltas = rng.uniform(-alpha, alpha, size=(count, 2))
+            centers_candidate[indices] += deltas
+        else:
+            i = int(rng.integers(n))
+            delta = rng.uniform(-alpha, alpha, size=2)
+            centers_candidate[i] += delta
+
+        centers_candidate = np.clip(centers_candidate, margin, 1 - margin)
+        radii_candidate = compute_max_radii(centers_candidate)
+        s = radii_candidate.sum()
+        if s > best_sum:
+            best_sum = s
+            best_centers = centers_candidate
+            best_radii = radii_candidate
+
+    # Final physics-based relaxation
+    best_centers = physics_relaxation(best_centers, best_radii, steps=70, margin=margin)
+    best_radii = compute_max_radii(best_centers)
+    return best_centers, best_radii
+
+def physics_relaxation(centers, radii, steps=70, margin=0.02):
+    """
+    Relax centers via pairwise repulsive forces and boundary constraints.
+    """
+    n = centers.shape[0]
+    centers = centers.copy()
+    for _ in range(steps):
+        forces = np.zeros_like(centers)
+        # Pairwise repulsion
+        diff = centers[:, None, :] - centers[None, :, :]
+        dist = np.linalg.norm(diff, axis=2) + np.eye(n)
+        overlap_mask = (dist < (radii[:, None] + radii[None, :]) + 1e-8) & (~np.eye(n, dtype=bool))
+        # Compute forces for overlaps
+        for i in range(n):
+            for j in range(i+1, n):
+                if overlap_mask[i, j]:
+                    d = dist[i, j]
+                    if d > 1e-8:
+                        dir_vec = diff[i, j] / d
+                    else:
+                        dir_vec = np.random.uniform(-1,1,2)
+                        dir_vec /= np.linalg.norm(dir_vec)
+                    overlap = (radii[i] + radii[j]) - d
+                    f = 0.2 * overlap * dir_vec
+                    forces[i] -= f
+                    forces[j] += f
+        # Boundary forces
+        for i in range(n):
+            x, y = centers[i]
+            r = radii[i]
+            # Left boundary
+            if x - r < margin:
+                forces[i,0] += 0.2 * (margin - (x - r))
+            # Right boundary
+            if x + r > 1 - margin:
+                forces[i,0] -= 0.2 * ((x + r) - (1 - margin))
+            # Bottom boundary
+            if y - r < margin:
+                forces[i,1] += 0.2 * (margin - (y - r))
+            # Top boundary
+            if y + r > 1 - margin:
+                forces[i,1] -= 0.2 * ((y + r) - (1 - margin))
+        centers += 0.15 * forces
+        centers = np.clip(centers, margin, 1 - margin)
+    return centers
+
+def compute_max_radii(centers):
+    """
+    Compute maximal radii respecting boundary and non-overlap constraints.
+    """
+    n = centers.shape[0]
+    radii = np.minimum.reduce([
+        centers[:,0],  # to left
+        centers[:,1],  # to bottom
+        1 - centers[:,0],  # to right
+        1 - centers[:,1]   # to top
+    ])
+    for _ in range(15):
+        changed = False
+        for i in range(n):
+            for j in range(i+1, n):
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d < 1e-8:
+                    if radii[i] != 0 or radii[j] != 0:
+                        radii[i] = radii[j] = 0
+                        changed = True
+                else:
+                    sum_r = radii[i] + radii[j]
+                    if sum_r > d:
+                        scale = d / sum_r
+                        new_ri = radii[i] * scale
+                        new_rj = radii[j] * scale
+                        if new_ri < radii[i]:
+                            radii[i] = new_ri
+                            changed = True
+                        if new_rj < radii[j]:
+                            radii[j] = new_rj
+                            changed = True
+        if not changed:
+            break
+    return radii
+# EVOLVE-BLOCK-END

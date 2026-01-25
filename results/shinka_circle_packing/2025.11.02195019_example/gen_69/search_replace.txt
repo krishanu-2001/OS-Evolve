@@ -1,0 +1,95 @@
+<NAME>
+enhanced_simulated_annealing_and_local_repacking
+</NAME>
+
+<DESCRIPTION>
+Replace the simple greedy post‐optimization with a true simulated annealing routine featuring an adaptive temperature schedule and occasional multi‐circle moves, followed by a local greedy repacking sweep. This allows downhill moves to escape local minima, adjusts temperature based on improvement rate, and performs fine‐grained local refinements for each circle, aiming to maximize the sum of radii.
+</DESCRIPTION>
+
+<DIFF>
+<<<<<<< SEARCH
+    # Post-optimization: brief simulated annealing to tweak centers
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_sum = np.sum(radii)
+    np.random.seed(1)
+    for it in range(500):
+        k = np.random.randint(1, 4)  # move 1-3 circles
+        idxs = np.random.choice(n, k, replace=False)
+        scale = 0.05 * (0.995 ** it)
+        trial = centers.copy()
+        trial[idxs] += np.random.randn(k, 2) * scale
+        trial = np.clip(trial, 0.01, 0.99)
+        trial_radii = compute_max_radii(trial)
+        s = np.sum(trial_radii)
+        if s > best_sum + 1e-8:
+            centers = trial
+            best_sum = s
+            best_centers = trial.copy()
+            best_radii = trial_radii.copy()
+    centers, radii = best_centers, best_radii
+    return centers, radii
+=======
+    # Post-optimization: simulated annealing with adaptive schedule and local greedy repacking
+    best_centers = centers.copy()
+    best_radii = radii.copy()
+    best_sum = np.sum(radii)
+    current_centers = centers.copy()
+    current_sum = best_sum
+    T0 = 0.01
+    T = T0
+    cooling_rate = 0.995
+    no_improve = 0
+    np.random.seed(1)
+    for it in range(1000):
+        # occasional multi-circle moves
+        if it % 100 == 0:
+            k = np.random.randint(2, 5)  # move 2-4 circles
+        else:
+            k = np.random.randint(1, 3)  # move 1-2 circles
+        idxs = np.random.choice(n, k, replace=False)
+        scale = 0.05 * (1 - it / 1000)
+        trial = current_centers.copy()
+        trial[idxs] += np.random.randn(k, 2) * scale
+        trial = np.clip(trial, 0.01, 0.99)
+        trial_radii = compute_max_radii(trial)
+        s = np.sum(trial_radii)
+        dE = s - current_sum
+        # Metropolis acceptance
+        if dE > 0 or np.random.rand() < np.exp(dE / T):
+            current_centers = trial
+            current_sum = s
+            if s > best_sum:
+                best_sum = s
+                best_centers = trial.copy()
+                best_radii = trial_radii.copy()
+                no_improve = 0
+            else:
+                no_improve += 1
+        else:
+            no_improve += 1
+        # adaptive temperature adjustment
+        if no_improve > 50:
+            T *= 1.05
+            no_improve = 0
+        else:
+            T *= cooling_rate
+    # Local greedy repacking sweep for fine detail
+    for i in range(n):
+        orig_pos = best_centers[i].copy()
+        for step in [0.01, 0.005, 0.001]:
+            for dx, dy in [(step,0),(-step,0),(0,step),(0,-step)]:
+                cand_centers = best_centers.copy()
+                cand_centers[i] = np.clip(orig_pos + np.array([dx, dy]), 0.01, 0.99)
+                cand_radii = compute_max_radii(cand_centers)
+                cand_sum = np.sum(cand_radii)
+                if cand_sum > best_sum:
+                    best_sum = cand_sum
+                    best_centers = cand_centers.copy()
+                    best_radii = cand_radii.copy()
+                    orig_pos = best_centers[i]
+        best_centers[i] = orig_pos
+    centers, radii = best_centers, best_radii
+    return centers, radii
+>>>>>>> REPLACE
+</DIFF>

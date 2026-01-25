@@ -1,0 +1,4 @@
+{
+    "correct": false,
+    "error": "Validation failed: Circles 0 & 11 overlap. Dist: 0.1508, Sum Radii: 0.1514"
+}
