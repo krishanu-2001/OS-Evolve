@@ -1,5 +1,5 @@
 <h1 align="center">
-  <a href="shinka/favicon.png?raw=true"><img src="shinka/favicon.png?raw=true" width="180" /></a><br>
+  <img width="180" alt="image" src="https://github.com/user-attachments/assets/f282c950-039a-41ce-9894-cc1c0fd2f461" />
   <b><code>OSEvolve</code>: Workload-Aware Evolution of CPU Scheduling Algorithms</b><br>
 </h1>
 
